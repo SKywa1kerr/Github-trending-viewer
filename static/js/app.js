@@ -344,10 +344,10 @@ function renderCard(p) {
         </div>
         <div class="card-description">${desc}</div>
         ${readmeSummary ? `
-            <button class="readme-toggle">
-                \uD83D\uDCD6 README \u6458\u8981 <span>\u25B2</span>
+            <button class="readme-toggle" type="button">
+                <span class="readme-toggle-label">README \u6458\u8981</span><span class="readme-toggle-icon">\u25BC</span>
             </button>
-            <div class="readme-content expanded">
+            <div class="readme-content">
                 <div class="readme-text">${readmeSummary}</div>
             </div>
         ` : ''}
@@ -849,7 +849,7 @@ async function retryFailedTranslations() {
 // ========== README Toggle ==========
 function toggleReadme(btn) {
     const content = btn.nextElementSibling;
-    const arrow = btn.querySelector('span');
+    const arrow = btn.querySelector('.readme-toggle-icon');
     content.classList.toggle('expanded');
     arrow.textContent = content.classList.contains('expanded') ? '\u25B2' : '\u25BC';
 }
