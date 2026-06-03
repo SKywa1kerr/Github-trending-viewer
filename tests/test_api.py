@@ -3,6 +3,7 @@ import tempfile
 import pytest
 from fastapi.testclient import TestClient
 from app import config as cfg
+from app.database import get_connection
 
 
 @pytest.fixture(autouse=True)
@@ -55,3 +56,26 @@ def test_keywords_crud(client):
     assert resp.status_code == 200
     resp = client.get("/api/keywords")
     assert len(resp.json()) == 0
+
+
+def test_favorites_api_returns_translation_state_fields(client):
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO projects (repo_full_name, repo_url, translation_status, translation_attempts) "
+        "VALUES (?, ?, ?, ?)",
+        ("favorite/repo", "https://github.com/favorite/repo", "failed", 3),
+    )
+    project_id = conn.execute(
+        "SELECT id FROM projects WHERE repo_full_name = ?",
+        ("favorite/repo",),
+    ).fetchone()["id"]
+    conn.execute("INSERT INTO favorites (project_id) VALUES (?)", (project_id,))
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/api/favorites")
+    assert resp.status_code == 200
+
+    item = resp.json()["items"][0]
+    assert item["translation_status"] == "failed"
+    assert item["translation_attempts"] == 3
