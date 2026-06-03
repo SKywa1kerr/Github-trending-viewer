@@ -1,49 +1,238 @@
 import asyncio
+from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks
 from app.database import get_connection
-from app.models import StatusOut
+from app.models import HealthOut, StatusOut
+from app.state_store import (
+    get_runtime_bool,
+    get_runtime_int,
+    get_runtime_state,
+    set_runtime_state,
+)
 
 router = APIRouter(prefix="/api")
 
-_is_refreshing = False
+
+def set_progress(stage="", total=0, done=0, detail=""):
+    set_runtime_state(
+        refresh_stage=stage,
+        refresh_detail=detail,
+        progress_total=total,
+        progress_done=done,
+    )
+
+
+def _utc_now_str() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _parse_datetime(value: str):
+    if not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _get_latest_fetched_at() -> str:
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT fetched_at FROM projects WHERE fetched_at != '' ORDER BY fetched_at DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    return row["fetched_at"] if row else ""
+
+
+def _build_data_freshness(latest_fetched_at: str, stale_after_hours: int) -> dict:
+    latest_fetched = _parse_datetime(latest_fetched_at)
+    age_hours = None
+    if latest_fetched:
+        age_hours = round((datetime.now(timezone.utc) - latest_fetched).total_seconds() / 3600, 1)
+    is_stale = age_hours is not None and age_hours > stale_after_hours
+    return {
+        "ok": not is_stale,
+        "latest_fetched_at": latest_fetched_at,
+        "age_hours": age_hours,
+        "stale_after_hours": stale_after_hours,
+    }
 
 
 @router.get("/status", response_model=StatusOut)
 def get_status():
+    from app.config import config
+
     conn = get_connection()
     total = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
     last = conn.execute(
         "SELECT fetched_at FROM projects ORDER BY fetched_at DESC LIMIT 1"
     ).fetchone()
+    counts = {
+        row["translation_status"] or "pending": row["count"]
+        for row in conn.execute(
+            "SELECT translation_status, COUNT(*) AS count FROM projects GROUP BY translation_status"
+        ).fetchall()
+    }
     conn.close()
+    runtime_state = get_runtime_state(
+        "refresh_stage",
+        "refresh_detail",
+        "progress_total",
+        "progress_done",
+        "last_refresh_error",
+        "last_refresh_failed_at",
+        "last_refresh_completed_at",
+    )
+    latest_fetched = last[0] if last else ""
+    freshness = _build_data_freshness(latest_fetched, config.DATA_STALE_HOURS)
     return StatusOut(
         total_projects=total,
-        last_fetched=last[0] if last else "",
-        is_refreshing=_is_refreshing
+        last_fetched=latest_fetched,
+        is_refreshing=get_runtime_bool("is_refreshing"),
+        refresh_stage=runtime_state["refresh_stage"],
+        refresh_detail=runtime_state["refresh_detail"],
+        translate_total=get_runtime_int("progress_total"),
+        translate_done=get_runtime_int("progress_done"),
+        translation_pending=counts.get("pending", 0),
+        translation_processing=counts.get("processing", 0),
+        translation_retry=counts.get("retry", 0),
+        translation_failed=counts.get("failed", 0),
+        translation_done=counts.get("done", 0),
+        last_refresh_error=runtime_state["last_refresh_error"],
+        last_refresh_failed_at=runtime_state["last_refresh_failed_at"],
+        last_refresh_completed_at=runtime_state["last_refresh_completed_at"],
+        data_age_hours=freshness["age_hours"],
+        data_stale_after_hours=freshness["stale_after_hours"],
+        is_data_stale=not freshness["ok"],
     )
+
+
+@router.get("/health", response_model=HealthOut)
+def get_health():
+    from app.config import config
+
+    checks = {}
+    problems = []
+
+    try:
+        conn = get_connection()
+        conn.execute("SELECT 1").fetchone()
+        conn.close()
+        checks["database"] = {"ok": True, "path": config.DB_PATH}
+    except Exception as exc:
+        checks["database"] = {"ok": False, "path": config.DB_PATH, "error": str(exc)}
+        problems.append("Database check failed")
+
+    checks["data_freshness"] = _build_data_freshness(
+        _get_latest_fetched_at(),
+        config.DATA_STALE_HOURS,
+    )
+    if not checks["data_freshness"]["ok"]:
+        problems.append("Project data is stale")
+
+    api_key_ok = bool((config.API_KEY or "").strip())
+    checks["model_api_key"] = {
+        "ok": api_key_ok,
+        "endpoint": config.API_ENDPOINT,
+        "model": config.API_MODEL,
+    }
+    if not api_key_ok:
+        problems.append("API_KEY is not configured")
+
+    github_token_ok = bool((config.GITHUB_TOKEN or "").strip())
+    checks["github_token"] = {"ok": github_token_ok}
+    if not github_token_ok:
+        problems.append("GITHUB_TOKEN is not configured; GitHub API rate limits will be lower")
+
+    proxy = config.PROXY or ""
+    checks["proxy"] = {
+        "ok": bool(proxy),
+        "value": proxy,
+    }
+    if not proxy:
+        problems.append("Proxy is not configured")
+
+    refresh_state = get_runtime_state("last_refresh_error", "last_refresh_failed_at")
+    last_refresh_error = refresh_state["last_refresh_error"]
+    checks["last_refresh"] = {
+        "ok": not bool(last_refresh_error),
+        "failed_at": refresh_state["last_refresh_failed_at"],
+    }
+    if last_refresh_error:
+        problems.append(f"Last refresh failed: {last_refresh_error}")
+
+    status = "ok" if all(check.get("ok") for check in checks.values()) else "warning"
+    return HealthOut(status=status, checks=checks, problems=problems)
 
 
 @router.post("/refresh")
 async def refresh(background_tasks: BackgroundTasks):
-    global _is_refreshing
-    if _is_refreshing:
+    if get_runtime_bool("is_refreshing"):
         return {"message": "already refreshing"}
-    _is_refreshing = True
+    set_runtime_state(is_refreshing="1")
     background_tasks.add_task(_do_refresh)
     return {"message": "refresh started"}
 
 
 async def _do_refresh():
-    global _is_refreshing
+    import logging
+    logger = logging.getLogger("refresh")
     try:
         from app.scraper import run_full_scrape
-        from app.translator import translate_untranslated_projects
+        from app.translator import start_translation_worker
         from app.scorer import update_all_scores
+        set_runtime_state(last_refresh_error="")
+        set_progress("scraping")
+        logger.info("Starting scrape...")
         await run_full_scrape()
-        await translate_untranslated_projects()
+        logger.info("Scrape done. Starting translation worker...")
+        start_translation_worker()
+        set_progress("scoring")
+        logger.info("Updating scores...")
         update_all_scores()
+        set_progress()
+        set_runtime_state(
+            last_refresh_error="",
+            last_refresh_completed_at=_utc_now_str(),
+        )
+        logger.info("Refresh complete.")
+    except Exception as e:
+        set_runtime_state(
+            last_refresh_error=str(e)[:500],
+            last_refresh_failed_at=_utc_now_str(),
+        )
+        logger.error(f"Refresh failed: {e}", exc_info=True)
     finally:
-        _is_refreshing = False
+        set_progress()
+        set_runtime_state(is_refreshing="0")
+
+
+@router.post("/translations/retry-failed")
+async def retry_failed_translations():
+    from app.translator import start_translation_worker
+
+    conn = get_connection()
+    conn.execute(
+        """
+        UPDATE projects
+        SET translation_status = 'pending',
+            translation_error = '',
+            translation_next_retry_at = '',
+            translation_attempts = 0
+        WHERE translation_status IN ('retry', 'failed')
+        """
+    )
+    conn.commit()
+    conn.close()
+    start_translation_worker()
+    return {"message": "retry queued"}
 
 
 @router.get("/categories")

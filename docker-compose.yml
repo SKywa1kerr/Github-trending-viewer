@@ -3,11 +3,14 @@ services:
     build: .
     container_name: github-trending
     ports:
-      - "127.0.0.1:8088:8000"
+      - "127.0.0.1:${APP_HOST_PORT:-8098}:8000"
     volumes:
       - ./data:/app/data
     env_file:
       - .env
     environment:
       - TZ=Asia/Shanghai
+      - HTTP_PROXY=${APP_HTTP_PROXY:-http://host.docker.internal:7897}
+      - HTTPS_PROXY=${APP_HTTPS_PROXY:-http://host.docker.internal:7897}
+      - NO_PROXY=${APP_NO_PROXY:-localhost,127.0.0.1}
     restart: unless-stopped

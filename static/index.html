@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GitHub 热门项目</title>
-    <link rel="stylesheet" href="/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Outfit:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css?v=21">
 </head>
 <body>
     <div id="app">
@@ -19,8 +22,9 @@
             <!-- 顶部栏 -->
             <header class="header">
                 <div class="header-left">
-                    <h1 class="title">GitHub 热门项目</h1>
-                    <span id="last-updated" class="last-updated"></span>
+                    <div class="title-kicker">Open Source Radar</div>
+                    <h1 class="title">GitHub <span class="title-accent">Trending</span></h1>
+                    <span id="last-updated" class="last-updated">正在读取状态...</span>
                 </div>
                 <div class="header-right">
                     <button id="btn-refresh" class="btn btn-refresh" title="刷新数据">
@@ -37,12 +41,71 @@
                 </div>
             </header>
 
+            <section class="overview">
+                <div class="overview-card">
+                    <span class="overview-label">项目库</span>
+                    <strong id="overview-total">--</strong>
+                    <span class="overview-note">本地缓存</span>
+                </div>
+                <div class="overview-card">
+                    <span class="overview-label">数据状态</span>
+                    <strong id="overview-freshness">--</strong>
+                    <span class="overview-note" id="overview-freshness-note">等待检查</span>
+                </div>
+                <div class="overview-card">
+                    <span class="overview-label">翻译队列</span>
+                    <strong id="overview-translations">--</strong>
+                    <span class="overview-note">待处理 / 已完成</span>
+                </div>
+                <div class="overview-card">
+                    <span class="overview-label">系统诊断</span>
+                    <strong id="overview-health">--</strong>
+                    <span class="overview-note" id="overview-health-note">等待检查</span>
+                </div>
+            </section>
+
+            <!-- 刷新进度条 -->
+            <div id="refresh-progress" class="refresh-progress hidden">
+                <div class="progress-info">
+                    <span id="progress-stage"></span>
+                    <span id="progress-detail"></span>
+                </div>
+                <div class="progress-bar">
+                    <div id="progress-fill" class="progress-fill"></div>
+                </div>
+            </div>
+
+            <section class="status-dock">
+                <div id="translation-summary" class="translation-summary">
+                    <div class="translation-summary-text">
+                        <span id="translation-summary-title">翻译队列</span>
+                        <span id="translation-summary-detail">正在读取状态...</span>
+                    </div>
+                    <button id="btn-retry-failed" class="btn btn-small" type="button">重试失败翻译</button>
+                </div>
+                <div id="health-summary" class="health-summary hidden">
+                    <div class="health-summary-text">
+                        <span id="health-summary-title">系统诊断</span>
+                        <span id="health-summary-detail"></span>
+                    </div>
+                    <button id="btn-refresh-health" class="btn btn-small" type="button">重新检查</button>
+                </div>
+            </section>
+
             <!-- 板块切换 -->
             <nav class="category-tabs">
                 <button class="tab active" data-category="ai">AI</button>
                 <button class="tab" data-category="tools">实用工具</button>
                 <button class="tab" data-category="devtools">开发工具</button>
                 <button class="tab" data-category="other">其他热门</button>
+                <button class="tab tab-recommend" data-category="recommend">
+                    <svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align:-2px;margin-right:2px"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" fill="currentColor"/></svg>
+                    为你推荐
+                </button>
+                <button class="tab tab-favorites" data-category="favorites">
+                    <svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align:-2px;margin-right:2px"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="currentColor"/></svg>
+                    收藏
+                </button>
             </nav>
 
             <!-- 筛选栏 -->
@@ -64,6 +127,7 @@
                 </div>
                 <div class="filter-group search-group">
                     <input type="text" id="search-input" placeholder="搜索项目...">
+                    <button id="btn-search-github" class="btn btn-small btn-github-search" title="搜索整个 GitHub">搜索 GitHub</button>
                 </div>
                 <button id="btn-add-keyword" class="btn btn-small" title="添加关注词">+ 添加关注词</button>
             </div>
@@ -71,9 +135,10 @@
             <!-- 项目卡片列表 -->
             <div id="project-list" class="project-list"></div>
 
-            <!-- 加载更多 -->
-            <div id="load-more" class="load-more hidden">
-                <button id="btn-load-more" class="btn">加载更多</button>
+            <!-- 滚动加载提示 -->
+            <div id="load-more" class="scroll-loading hidden">
+                <div class="scroll-loading-spinner"></div>
+                <span>加载中...</span>
             </div>
 
             <!-- 空状态 -->
@@ -101,6 +166,44 @@
             </div>
         </div>
     </div>
-    <script src="/js/app.js"></script>
+    <!-- AI 聊天弹窗 -->
+    <div id="chat-modal" class="modal hidden">
+        <div class="modal-content chat-modal-content">
+            <div class="chat-header">
+                <div class="chat-title">
+                    <svg viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-3px;margin-right:6px">
+                        <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z" fill="currentColor"/>
+                    </svg>
+                    <span id="chat-repo-name"></span>
+                </div>
+                <button id="btn-close-chat" class="chat-close">&times;</button>
+            </div>
+            <div id="chat-messages" class="chat-messages">
+                <div class="chat-welcome">
+                    <p>你可以问我关于这个项目的任何问题，比如：</p>
+                    <div class="chat-suggestions">
+                        <button class="chat-suggestion" data-q="这个项目适合什么场景使用？">适合什么场景？</button>
+                        <button class="chat-suggestion" data-q="这个项目的核心优势是什么？和同类项目相比如何？">核心优势是什么？</button>
+                        <button class="chat-suggestion" data-q="如何快速上手这个项目？需要什么前置条件？">如何快速上手？</button>
+                        <button class="chat-suggestion" data-q="这个项目有什么局限性或注意事项？">有什么局限性？</button>
+                    </div>
+                </div>
+            </div>
+            <div class="chat-input-area">
+                <input type="text" id="chat-input" placeholder="输入你的问题...">
+                <button id="btn-send-chat" class="btn-send">
+                    <svg viewBox="0 0 24 24" width="20" height="20"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" fill="currentColor"/></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 回到顶部 -->
+    <button id="btn-back-top" class="btn-back-top" title="回到顶部">
+        <svg viewBox="0 0 24 24" width="20" height="20">
+            <path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z" fill="currentColor"/>
+        </svg>
+    </button>
+    <script type="module" src="/js/app.js?v=16"></script>
 </body>
 </html>
