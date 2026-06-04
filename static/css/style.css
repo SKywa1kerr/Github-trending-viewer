@@ -617,6 +617,73 @@ body::before {
     background: rgba(28, 25, 23, 0.62);
 }
 
+.result-context {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 48px;
+    margin: -4px 0 14px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, 0.48);
+    box-shadow: var(--shadow-sm);
+}
+
+[data-theme="dark"] .result-context {
+    background: rgba(28, 25, 23, 0.54);
+}
+
+.result-context-label {
+    flex-shrink: 0;
+    padding: 4px 8px;
+    border-radius: 4px;
+    color: var(--accent);
+    background: var(--accent-soft);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.result-context-main {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+}
+
+.result-context-main strong {
+    color: var(--text-primary);
+    font-family: 'Fraunces', 'Noto Sans SC', Georgia, serif;
+    font-size: 15px;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.result-context-main span {
+    color: var(--text-secondary);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.result-context-remote .result-context-label {
+    color: #0369a1;
+    background: #e0f2fe;
+}
+
+.result-context-favorites .result-context-label {
+    color: #b91c1c;
+    background: var(--danger-soft);
+}
+
+.result-context-recommend .result-context-label {
+    color: var(--star-color);
+    background: var(--star-bg);
+}
+
 .filter-group {
     display: flex;
     align-items: center;
@@ -1523,6 +1590,20 @@ body::before {
     .status-dock { grid-template-columns: 1fr; }
     .translation-summary, .health-summary { flex-direction: column; align-items: stretch; }
     .filters { flex-direction: column; align-items: stretch; }
+    .result-context {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .result-context-main {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 4px;
+        width: 100%;
+    }
+    .result-context-main strong {
+        white-space: normal;
+    }
     .filter-group { width: 100%; }
     .search-group { min-width: auto; flex-direction: column; }
     .search-group input { width: 100%; }

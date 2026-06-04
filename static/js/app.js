@@ -274,13 +274,13 @@ async function loadProjects(append = false) {
         const list = document.getElementById('project-list');
         const empty = document.getElementById('empty-state');
         const scrollHint = document.getElementById('load-more');
+        updateResultContext();
 
         if (!append) list.innerHTML = '';
 
         if (data.items.length === 0 && !append) {
             empty.classList.remove('hidden');
-            empty.querySelector('p').textContent = state.favoritesMode
-                ? '\u8FD8\u6CA1\u6709\u6536\u85CF\u7684\u9879\u76EE' : '\u6682\u65E0\u9879\u76EE\u6570\u636E';
+            empty.querySelector('p').textContent = emptyStateMessage(state);
             scrollHint.classList.add('hidden');
         } else {
             empty.classList.add('hidden');
@@ -452,20 +452,24 @@ async function loadRecommendations(force = false) {
     loadMore.classList.add('hidden');
     list.innerHTML = '<div class="rec-loading">AI \u6B63\u5728\u5206\u6790\u4F60\u7684\u6536\u85CF\u504F\u597D\uFF0C\u751F\u6210\u63A8\u8350...</div>';
     empty.classList.add('hidden');
+    state.total = 0;
+    updateResultContext();
 
     try {
         const url = force ? '/recommendations?force=true' : '/recommendations';
         const data = await api(url);
         list.innerHTML = '';
+        state.total = Array.isArray(data.items) ? data.items.length : 0;
+        updateResultContext();
 
         if (data.message === 'no_favorites') {
             empty.classList.remove('hidden');
-            empty.querySelector('p').textContent = '\u6536\u85CF\u4E00\u4E9B\u9879\u76EE\u540E\uFF0CAI \u4F1A\u4E3A\u4F60\u63A8\u8350\u76F8\u4F3C\u9879\u76EE';
+            empty.querySelector('p').textContent = emptyStateMessage({ recommendMode: true, reason: 'no_favorites' });
             return;
         }
         if (data.items.length === 0) {
             empty.classList.remove('hidden');
-            empty.querySelector('p').textContent = '\u6682\u65E0\u63A8\u8350\uFF0C\u8BD5\u8BD5\u591A\u6536\u85CF\u4E00\u4E9B\u9879\u76EE';
+            empty.querySelector('p').textContent = emptyStateMessage({ recommendMode: true });
             return;
         }
 
@@ -498,7 +502,8 @@ async function loadRecommendations(force = false) {
     } catch (e) {
         list.innerHTML = '';
         empty.classList.remove('hidden');
-        empty.querySelector('p').textContent = '\u52A0\u8F7D\u63A8\u8350\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5';
+        empty.querySelector('p').textContent = emptyStateMessage({ recommendMode: true, reason: 'error' });
+        updateResultContext();
     }
 }
 
@@ -549,6 +554,72 @@ export function emptyStateMessage({ favoritesMode = false, recommendMode = false
     if (githubSearch && reason === 'error') return 'GitHub 搜索失败，请检查网络或稍后重试';
     if (githubSearch) return 'GitHub 没有返回匹配项目';
     return '暂无项目数据';
+}
+
+export function buildResultContext({
+    category = 'ai',
+    language = '',
+    query = '',
+    total = 0,
+    favoritesMode = false,
+    recommendMode = false,
+    githubSearch = false,
+} = {}) {
+    const countText = `共 ${formatCount(total)} 个项目`;
+    if (githubSearch) {
+        return {
+            label: 'GitHub 搜索',
+            title: query || '实时搜索',
+            detail: `来自 GitHub 实时搜索 · ${formatCount(total)} 个结果`,
+            tone: 'remote',
+        };
+    }
+    if (favoritesMode) {
+        return {
+            label: '收藏',
+            title: '已收藏项目',
+            detail: countText,
+            tone: 'favorites',
+        };
+    }
+    if (recommendMode) {
+        return {
+            label: '为你推荐',
+            title: 'AI 推荐列表',
+            detail: total > 0 ? countText : '等待收藏偏好',
+            tone: 'recommend',
+        };
+    }
+
+    const categoryLabels = {
+        ai: 'AI',
+        tools: '实用工具',
+        devtools: '开发工具',
+        other: '其他热门',
+    };
+    const parts = [categoryLabels[category] || category || '全部'];
+    if (language) parts.push(language);
+    if (query) parts.push(query);
+    return {
+        label: '本地筛选',
+        title: parts.join(' · '),
+        detail: countText,
+        tone: 'local',
+    };
+}
+
+function updateResultContext(overrides = {}) {
+    const box = document.getElementById('result-context');
+    const label = document.getElementById('result-context-label');
+    const title = document.getElementById('result-context-title');
+    const detail = document.getElementById('result-context-detail');
+    if (!box || !label || !title || !detail) return;
+
+    const context = buildResultContext({ ...state, ...overrides });
+    box.className = `result-context result-context-${context.tone}`;
+    label.textContent = context.label;
+    title.textContent = context.title;
+    detail.textContent = context.detail;
 }
 
 export function formatTranslationSummary(status) {
@@ -656,6 +727,7 @@ function setupEventListeners() {
         try {
             const data = await api(`/search/github?q=${encodeURIComponent(q)}`);
             state.githubSearch = true;
+            state.query = q;
             state.total = data.total;
             const list = document.getElementById('project-list');
             const empty = document.getElementById('empty-state');
@@ -667,13 +739,24 @@ function setupEventListeners() {
                 list.appendChild(card);
             });
             loadMore.classList.add('hidden');
+            updateResultContext();
             if (data.items.length === 0) {
                 empty.classList.remove('hidden');
+                empty.querySelector('p').textContent = emptyStateMessage({ githubSearch: true });
             } else {
                 empty.classList.add('hidden');
             }
         } catch (e) {
             console.error('GitHub search failed:', e);
+            state.githubSearch = true;
+            state.query = q;
+            state.total = 0;
+            document.getElementById('project-list').innerHTML = '';
+            document.getElementById('load-more').classList.add('hidden');
+            const empty = document.getElementById('empty-state');
+            empty.classList.remove('hidden');
+            empty.querySelector('p').textContent = emptyStateMessage({ githubSearch: true, reason: 'error' });
+            updateResultContext();
         }
         btnSearchGithub.disabled = false;
         btnSearchGithub.textContent = '搜索 GitHub';
