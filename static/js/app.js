@@ -432,6 +432,7 @@ async function toggleFavorite(project, btn, card) {
             await api(`/favorites/${projectId}`, { method: 'DELETE' });
             btn.classList.remove('favorited');
             project.is_favorited = false;
+            showToast('已取消收藏', 'info');
             // If in favorites view, remove the card with animation
             if (state.favoritesMode) {
                 card.style.transition = 'opacity 0.3s, transform 0.3s';
@@ -449,6 +450,7 @@ async function toggleFavorite(project, btn, card) {
             await api(`/favorites/${projectId}`, { method: 'POST' });
             btn.classList.add('favorited');
             project.is_favorited = true;
+            showToast('已加入收藏', 'success');
             // Heart pop animation
             btn.classList.add('pop');
             setTimeout(() => btn.classList.remove('pop'), 400);
@@ -986,7 +988,10 @@ function applyTheme() {
 function toggleTheme() {
     state.theme = state.theme === 'light' ? 'dark' : 'light';
     localStorage.setItem('theme', state.theme);
+    const root = document.documentElement;
+    root.classList.add('theme-anim');
     applyTheme();
+    setTimeout(() => root.classList.remove('theme-anim'), 480);
 }
 
 function setAccent(accent) {
@@ -994,6 +999,22 @@ function setAccent(accent) {
     state.accent = accent;
     localStorage.setItem('accent', accent);
     applyTheme();
+}
+
+// ========== Toast ==========
+let _toastRoot = null;
+function showToast(message, type = 'info') {
+    if (!_toastRoot) _toastRoot = document.getElementById('toast-root');
+    if (!_toastRoot) return;
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = message;
+    _toastRoot.appendChild(el);
+    requestAnimationFrame(() => el.classList.add('show'));
+    setTimeout(() => {
+        el.classList.remove('show');
+        setTimeout(() => el.remove(), 320);
+    }, 2400);
 }
 
 // ========== Refresh ==========
@@ -1037,6 +1058,7 @@ async function onRefresh() {
     btn.disabled = true;
     try {
         await api('/refresh', { method: 'POST' });
+        showToast('已开始刷新数据', 'info');
         const poll = setInterval(async () => {
             const s = await api('/status');
             updateStatusUI(s);
@@ -1060,6 +1082,7 @@ async function retryFailedTranslations() {
     btn.disabled = true;
     try {
         await api('/translations/retry-failed', { method: 'POST' });
+        showToast('已加入重试队列', 'info');
         const status = await api('/status');
         updateStatusUI(status);
         if (!state.recommendMode && !state.githubSearch && state.page === 1) {
