@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 import {
   buildModeState,
   buildResultContext,
+  buildSparklinePoints,
   emptyStateMessage,
   formatTranslationSummary,
   renderProjectMeta,
+  renderSparkline,
+  sparklineTrend,
 } from '../static/js/app.js';
 
 assert.deepEqual(buildModeState('favorites'), {
@@ -136,3 +139,59 @@ assert.match(
   }),
   /已翻译/
 );
+
+// Sparkline slot only exists for persisted projects (GitHub search results have id 0)
+assert.match(
+  renderProjectMeta({ id: 7, stars: 1, stars_gained: 0, language: '', translation_status: '' }),
+  /class="star-trend" data-project-id="7"/
+);
+assert.doesNotMatch(
+  renderProjectMeta({ id: 0, stars: 1, stars_gained: 0, language: '', translation_status: '' }),
+  /star-trend/
+);
+
+// ---- sparkline geometry ----
+assert.deepEqual(buildSparklinePoints([]), []);
+assert.deepEqual(buildSparklinePoints([{ date: '2026-09-01', stars: 5 }]), []);
+assert.deepEqual(
+  buildSparklinePoints([{ stars: 0 }, { stars: 10 }, { stars: 5 }], 20, 10, 0),
+  [[0, 10], [10, 0], [20, 5]]
+);
+// flat series must not divide by zero and should draw a mid line
+assert.deepEqual(
+  buildSparklinePoints([{ stars: 3 }, { stars: 3 }], 10, 10, 0),
+  [[0, 10], [10, 10]]
+);
+// non-numeric entries are skipped
+assert.deepEqual(
+  buildSparklinePoints([{ stars: 'x' }, { stars: 1 }, null, { stars: 2 }], 10, 10, 0),
+  [[0, 10], [10, 0]]
+);
+
+assert.equal(sparklineTrend([]), 'flat');
+assert.equal(sparklineTrend([{ stars: 1 }, { stars: 1 }]), 'flat');
+assert.equal(sparklineTrend([{ stars: 1 }, { stars: 9 }]), 'up');
+assert.equal(sparklineTrend([{ stars: 9 }, { stars: 1 }]), 'down');
+
+assert.equal(renderSparkline([{ stars: 1 }]), '');
+{
+  const svg = renderSparkline([
+    { date: '2026-09-01', stars: 1000 },
+    { date: '2026-09-02', stars: 1500 },
+    { date: '2026-09-03', stars: 2300 },
+  ]);
+  assert.match(svg, /^<svg class="sparkline sparkline-up"/);
+  assert.match(svg, /<title>最近 3 次记录：\+1\.3k star<\/title>/);
+  assert.match(svg, /<path d="M2 20 L36 [\d.]+ L70 2"/);
+  assert.match(svg, /<circle cx="70" cy="2"/);
+}
+{
+  const svg = renderSparkline([{ stars: 50 }, { stars: 40 }]);
+  assert.match(svg, /sparkline-down/);
+  assert.match(svg, /<title>最近 2 次记录：-10 star<\/title>/);
+}
+// title text is escaped, so hostile data cannot break out of the SVG
+{
+  const svg = renderSparkline([{ stars: 1 }, { stars: 2 }]);
+  assert.doesNotMatch(svg, /<script/);
+}

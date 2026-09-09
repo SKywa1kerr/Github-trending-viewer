@@ -14,6 +14,7 @@ const state = {
     recommendMode: false,
     githubSearch: false,
     theme: typeof localStorage !== 'undefined' ? (localStorage.getItem('theme') || 'light') : 'light',
+    accent: typeof localStorage !== 'undefined' ? (localStorage.getItem('accent') || 'indigo') : 'indigo',
     statusSignature: ''
 };
 
@@ -30,6 +31,7 @@ async function api(path, options = {}) {
 // ========== Init ==========
 async function init() {
     applyTheme();
+    updateTabIndicator();
     await checkStatus();
     await checkHealth();
     await loadLanguages();
@@ -245,9 +247,26 @@ async function loadLanguages() {
 }
 
 // ========== Load Projects ==========
+function renderSkeletons(list, count = 4) {
+    for (let i = 0; i < count; i++) {
+        const card = document.createElement('div');
+        card.className = 'project-card skeleton-card';
+        card.innerHTML =
+            '<div class="sk-line sk-line-title"></div>' +
+            '<div class="sk-line sk-line-desc"></div>' +
+            '<div class="sk-line sk-line-desc-short"></div>' +
+            '<div class="sk-line sk-line-meta"></div>';
+        list.appendChild(card);
+    }
+}
+
 async function loadProjects(append = false) {
     if (state.loading) return;
     state.loading = true;
+
+    const listEl = document.getElementById('project-list');
+    // Only on a cold list, so filtering or searching never flashes placeholders.
+    if (!append && listEl.children.length === 0) renderSkeletons(listEl);
 
     try {
         let data;
@@ -285,11 +304,14 @@ async function loadProjects(append = false) {
         } else {
             empty.classList.add('hidden');
             const startIndex = list.children.length;
+            const newCards = [];
             data.items.forEach((p, i) => {
                 const card = renderCard(p);
                 card.style.animationDelay = `${(startIndex + i) * 0.04}s`;
                 list.appendChild(card);
+                newCards.push(card);
             });
+            hydrateSparklines(newCards);
             const shown = list.children.length;
             if (shown < state.total) {
                 scrollHint.classList.remove('hidden');
@@ -441,7 +463,24 @@ function switchToCategory(cat) {
     state.page = 1;
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelector(`.tab[data-category="${cat}"]`).classList.add('active');
+    updateTabIndicator();
     loadProjects();
+}
+
+// ========== Tab Indicator ==========
+const TAB_TINTS = {
+    favorites: 'var(--danger-soft)',
+    recommend: 'var(--star-bg)'
+};
+
+function updateTabIndicator() {
+    const indicator = document.getElementById('tab-indicator');
+    const active = document.querySelector('.tab.active');
+    if (!indicator || !active) return;
+    indicator.style.width = `${active.offsetWidth}px`;
+    indicator.style.transform = `translateX(${active.offsetLeft}px)`;
+    indicator.style.setProperty('--indicator-bg', TAB_TINTS[active.dataset.category] || 'var(--bg-card)');
+    indicator.classList.add('ready');
 }
 
 // ========== Recommendations ==========
@@ -486,6 +525,7 @@ async function loadRecommendations(force = false) {
             loadRecommendations(true);
         });
 
+        const recCards = [];
         data.items.forEach((p, i) => {
             const card = renderCard(p);
             if (p.recommendation_reason) {
@@ -498,7 +538,9 @@ async function loadRecommendations(force = false) {
             }
             card.style.animationDelay = `${i * 0.04}s`;
             list.appendChild(card);
+            recCards.push(card);
         });
+        hydrateSparklines(recCards);
     } catch (e) {
         list.innerHTML = '';
         empty.classList.remove('hidden');
@@ -637,14 +679,97 @@ export function renderProjectMeta(project) {
         ? `<span class="star-gained">+${formatStars(project.stars_gained)}</span>` : '';
     const langHtml = project.language
         ? `<span class="card-language">${escapeHtml(project.language)}</span>` : '';
+    const sparkSlot = project.id
+        ? `<span class="star-trend" data-project-id="${Number(project.id)}" aria-hidden="true"></span>` : '';
     return `
         <div class="card-stats">
             <span class="star-count">⭐ ${formatStars(project.stars)}</span>
+            ${sparkSlot}
             ${gainedHtml}
             ${langHtml}
             ${renderTranslationBadge(project.translation_status)}
         </div>
     `;
+}
+
+// ========== Star Trend Sparklines ==========
+const SPARK_WIDTH = 72;
+const SPARK_HEIGHT = 22;
+const SPARK_PAD = 2;
+
+function sparklineValues(history) {
+    return (history || [])
+        .filter((h) => h && typeof h === 'object' && h.stars !== null && h.stars !== undefined && h.stars !== '')
+        .map((h) => Number(h.stars))
+        .filter((v) => Number.isFinite(v));
+}
+
+export function buildSparklinePoints(history, width = SPARK_WIDTH, height = SPARK_HEIGHT, pad = SPARK_PAD) {
+    const values = sparklineValues(history);
+    if (values.length < 2) return [];
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const span = max - min || 1;
+    const stepX = (width - pad * 2) / (values.length - 1);
+    return values.map((v, i) => {
+        const x = pad + i * stepX;
+        const y = height - pad - ((v - min) / span) * (height - pad * 2);
+        return [Number(x.toFixed(1)), Number(y.toFixed(1))];
+    });
+}
+
+export function sparklineTrend(history) {
+    const values = sparklineValues(history);
+    if (values.length < 2) return 'flat';
+    const first = values[0];
+    const last = values[values.length - 1];
+    const delta = last - first;
+    if (delta === 0) return 'flat';
+    return delta > 0 ? 'up' : 'down';
+}
+
+export function renderSparkline(history) {
+    const points = buildSparklinePoints(history);
+    if (!points.length) return '';
+    const values = sparklineValues(history);
+    const trend = sparklineTrend(history);
+    const path = points.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x} ${y}`).join(' ');
+    const [lastX, lastY] = points[points.length - 1];
+    const delta = values[values.length - 1] - values[0];
+    const deltaText = delta === 0 ? '0' : `${delta > 0 ? '+' : '-'}${formatStars(Math.abs(delta))}`;
+    const title = `最近 ${values.length} 次记录：${deltaText} star`;
+    return `<svg class="sparkline sparkline-${trend}" viewBox="0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}" width="${SPARK_WIDTH}" height="${SPARK_HEIGHT}" role="img">`
+        + `<title>${escapeHtml(title)}</title>`
+        + `<path d="${path}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>`
+        + `<circle cx="${lastX}" cy="${lastY}" r="1.8" fill="currentColor"/>`
+        + `</svg>`;
+}
+
+async function hydrateSparklines(cards) {
+    const slots = [];
+    cards.forEach((card) => {
+        const slot = card.querySelector('.star-trend[data-project-id]');
+        if (slot && !slot.dataset.loaded) slots.push(slot);
+    });
+    if (!slots.length) return;
+    const ids = [...new Set(slots.map((s) => s.dataset.projectId))].filter((id) => Number(id) > 0);
+    if (!ids.length) return;
+    try {
+        const history = await api(`/star-history?ids=${ids.join(',')}&points=30`);
+        slots.forEach((slot) => {
+            slot.dataset.loaded = '1';
+            const series = history[slot.dataset.projectId];
+            const svg = renderSparkline(series || []);
+            if (svg) {
+                slot.innerHTML = svg;
+                slot.classList.add('has-data');
+            } else {
+                slot.remove();
+            }
+        });
+    } catch (e) {
+        slots.forEach((slot) => slot.remove());
+    }
 }
 
 function formatCount(n) {
@@ -683,10 +808,12 @@ function setupEventListeners() {
             const cat = tab.dataset.category;
             const nextMode = buildModeState(cat);
             Object.assign(state, nextMode);
+            updateTabIndicator();
             if (state.recommendMode) loadRecommendations();
             else loadProjects();
         });
     });
+    window.addEventListener('resize', updateTabIndicator);
 
     // Language filter
     document.getElementById('filter-language').addEventListener('change', (e) => {
@@ -777,6 +904,10 @@ function setupEventListeners() {
 
     // Theme toggle
     document.getElementById('btn-theme').addEventListener('click', toggleTheme);
+    document.getElementById('accent-picker').addEventListener('click', (e) => {
+        const dot = e.target.closest('.accent-dot');
+        if (dot) setAccent(dot.dataset.accent);
+    });
 
     // Infinite scroll
     let scrollTimer;
@@ -846,11 +977,22 @@ function setupEventListeners() {
 // ========== Theme ==========
 function applyTheme() {
     document.documentElement.setAttribute('data-theme', state.theme);
+    document.documentElement.setAttribute('data-accent', state.accent);
+    document.querySelectorAll('.accent-dot').forEach((dot) => {
+        dot.setAttribute('aria-pressed', dot.dataset.accent === state.accent ? 'true' : 'false');
+    });
 }
 
 function toggleTheme() {
     state.theme = state.theme === 'light' ? 'dark' : 'light';
     localStorage.setItem('theme', state.theme);
+    applyTheme();
+}
+
+function setAccent(accent) {
+    if (!accent || accent === state.accent) return;
+    state.accent = accent;
+    localStorage.setItem('accent', accent);
     applyTheme();
 }
 

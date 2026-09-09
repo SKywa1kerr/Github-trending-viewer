@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Outfit:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/css/style.css?v=21">
+    <link rel="stylesheet" href="/css/style.css?v=25">
 </head>
 <body>
     <div id="app">
@@ -38,6 +38,12 @@
                             <path d="M12 3a9 9 0 109 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 01-4.4 2.26 5.403 5.403 0 01-3.14-9.8c-.44-.06-.9-.1-1.36-.1z" fill="currentColor"/>
                         </svg>
                     </button>
+                    <div class="accent-picker" id="accent-picker" role="group" aria-label="强调色">
+                        <button class="accent-dot" type="button" data-accent="teal" title="青绿" aria-label="青绿"></button>
+                        <button class="accent-dot" type="button" data-accent="indigo" title="靛蓝" aria-label="靛蓝"></button>
+                        <button class="accent-dot" type="button" data-accent="amber" title="琥珀" aria-label="琥珀"></button>
+                        <button class="accent-dot" type="button" data-accent="rose" title="玫红" aria-label="玫红"></button>
+                    </div>
                 </div>
             </header>
 
@@ -94,6 +100,7 @@
 
             <!-- 板块切换 -->
             <nav class="category-tabs">
+                <span class="tab-indicator" id="tab-indicator" aria-hidden="true"></span>
                 <button class="tab active" data-category="ai">AI</button>
                 <button class="tab" data-category="tools">实用工具</button>
                 <button class="tab" data-category="devtools">开发工具</button>
@@ -212,6 +219,6 @@
             <path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z" fill="currentColor"/>
         </svg>
     </button>
-    <script type="module" src="/js/app.js?v=16"></script>
+    <script type="module" src="/js/app.js?v=20"></script>
 </body>
 </html>
