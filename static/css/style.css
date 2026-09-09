@@ -8,64 +8,64 @@
 :root {
     color-scheme: light;
 
-    /* Cool neutral backgrounds — page is a soft gray-blue so white cards float cleanly */
-    --bg-primary: #f3f4f6;
-    --bg-secondary: #e9ebef;
+    /* Google-style light surfaces — crisp white cards on near-white gray */
+    --bg-primary: #f8f9fa;
+    --bg-secondary: #f1f3f4;
     --bg-card: #ffffff;
-    --bg-card-hover: #fbfcfe;
+    --bg-card-hover: #f8fbff;
     --bg-elevated: #ffffff;
 
-    /* Typography colors — cool slate, all three levels clear 4.5:1 on card backgrounds */
-    --text-primary: #111827;
-    --text-secondary: #4b5563;
-    --text-muted: #6b7280;
+    /* Typography — Google's gray scale, high contrast */
+    --text-primary: #202124;
+    --text-secondary: #5f6368;
+    --text-muted: #70757a;
 
-    /* Accent — preset driven, switched by [data-accent] on <html>; indigo is default */
-    --accent: #4f46e5;
-    --accent-hover: #4338ca;
+    /* Accent — preset driven, switched by [data-accent] on <html>; Google Blue is default */
+    --accent: #1a73e8;
+    --accent-hover: #1765cc;
     --accent-contrast: #ffffff;
-    --accent-rgb: 79, 70, 229;
-    --accent-alt: #7c3aed;
-    --accent-soft: rgba(var(--accent-rgb), 0.08);
-    --accent-medium: rgba(var(--accent-rgb), 0.18);
-    --accent-glow: rgba(var(--accent-rgb), 0.22);
+    --accent-rgb: 26, 115, 232;
+    --accent-alt: #4285F4;
+    --accent-soft: rgba(var(--accent-rgb), 0.1);
+    --accent-medium: rgba(var(--accent-rgb), 0.22);
+    --accent-glow: rgba(var(--accent-rgb), 0.28);
 
-    /* Semantic colors — each ships a fill, a soft surface and a border */
-    --success: #15803d;
-    --success-soft: rgba(21, 128, 61, 0.08);
-    --success-border: rgba(21, 128, 61, 0.28);
-    --warning: #b45309;
-    --warning-strong: #92400e;
-    --warning-soft: rgba(180, 83, 9, 0.08);
-    --warning-border: rgba(180, 83, 9, 0.3);
-    --danger: #dc2626;
-    --danger-soft: rgba(220, 38, 38, 0.07);
-    --danger-border: rgba(220, 38, 38, 0.28);
-    --info: #0369a1;
-    --info-soft: rgba(3, 105, 161, 0.08);
-    --info-border: rgba(3, 105, 161, 0.26);
+    /* Semantic colors — Google's vivid red / green / yellow / blue */
+    --success: #188038;
+    --success-soft: rgba(24, 128, 56, 0.09);
+    --success-border: rgba(24, 128, 56, 0.3);
+    --warning: #e37400;
+    --warning-strong: #b45309;
+    --warning-soft: rgba(227, 116, 0, 0.1);
+    --warning-border: rgba(227, 116, 0, 0.32);
+    --danger: #d93025;
+    --danger-soft: rgba(217, 48, 37, 0.09);
+    --danger-border: rgba(217, 48, 37, 0.3);
+    --info: #1967d2;
+    --info-soft: rgba(25, 103, 210, 0.09);
+    --info-border: rgba(25, 103, 210, 0.3);
 
     /* Star / growth signals */
     --star-color: #b45309;
-    --star-bg: rgba(180, 83, 9, 0.07);
-    --star-border: rgba(180, 83, 9, 0.18);
-    --gained-color: #047857;
-    --gained-bg: rgba(4, 120, 87, 0.08);
+    --star-bg: rgba(180, 83, 9, 0.09);
+    --star-border: rgba(180, 83, 9, 0.22);
+    --gained-color: #188038;
+    --gained-bg: rgba(24, 128, 56, 0.09);
 
     /* Overview card tints, in card order: 项目库 / 数据状态 / 翻译队列 / 系统诊断 */
-    --tint-1: rgba(180, 83, 9, 0.09);
-    --tint-2: rgba(4, 120, 87, 0.08);
-    --tint-3: rgba(3, 105, 161, 0.07);
-    --tint-4: rgba(124, 58, 237, 0.07);
+    --tint-1: rgba(66, 133, 244, 0.12);
+    --tint-2: rgba(52, 168, 83, 0.12);
+    --tint-3: rgba(251, 188, 4, 0.14);
+    --tint-4: rgba(234, 67, 53, 0.12);
 
-    /* Borders & shadows — cool-tinted, subtle but enough to separate surfaces */
-    --border: #e4e7ec;
-    --border-strong: #d2d6dd;
-    --shadow-sm: 0 1px 2px rgba(17, 24, 39, 0.06);
-    --shadow-card: 0 1px 2px rgba(17, 24, 39, 0.05), 0 12px 30px -14px rgba(17, 24, 39, 0.16);
-    --shadow-card-hover: 0 2px 4px rgba(17, 24, 39, 0.05), 0 20px 46px -16px rgba(17, 24, 39, 0.22);
-    --shadow-float: 0 24px 64px rgba(17, 24, 39, 0.14);
-    --shadow-header: 0 12px 30px rgba(17, 24, 39, 0.07);
+    /* Borders & shadows — Google Material elevation, gray-700 tinted */
+    --border: #dadce0;
+    --border-strong: #bdc1c6;
+    --shadow-sm: 0 1px 2px rgba(60, 64, 67, 0.3);
+    --shadow-card: 0 1px 2px rgba(60, 64, 67, 0.3), 0 2px 6px 2px rgba(60, 64, 67, 0.15);
+    --shadow-card-hover: 0 1px 3px rgba(60, 64, 67, 0.3), 0 4px 8px 3px rgba(60, 64, 67, 0.15);
+    --shadow-float: 0 8px 16px rgba(60, 64, 67, 0.2);
+    --shadow-header: 0 1px 3px rgba(60, 64, 67, 0.12), 0 2px 6px rgba(60, 64, 67, 0.08);
     --card-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
     /* Raised surface = drop shadow + a hairline top highlight, reads as thickness */
     --shadow-surface: var(--shadow-card), var(--card-highlight);
@@ -193,11 +193,11 @@
 }
 
 [data-accent="indigo"] {
-    --accent: #4f46e5;
-    --accent-hover: #4338ca;
+    --accent: #1a73e8;
+    --accent-hover: #1765cc;
     --accent-contrast: #ffffff;
-    --accent-rgb: 79, 70, 229;
-    --accent-alt: #7c3aed;
+    --accent-rgb: 26, 115, 232;
+    --accent-alt: #4285F4;
 }
 
 [data-accent="amber"] {
@@ -225,11 +225,11 @@
 }
 
 [data-theme="dark"][data-accent="indigo"] {
-    --accent: #a5b4fc;
-    --accent-hover: #c7d2fe;
-    --accent-contrast: #1e1b4b;
-    --accent-rgb: 165, 180, 252;
-    --accent-alt: #c4b5fd;
+    --accent: #8ab4f8;
+    --accent-hover: #aecbfa;
+    --accent-contrast: #1a237e;
+    --accent-rgb: 138, 180, 248;
+    --accent-alt: #669df6;
 }
 
 [data-theme="dark"][data-accent="amber"] {
@@ -392,13 +392,13 @@ button:focus-visible,
 }
 
 .title-accent {
-    color: var(--accent);
     font-style: italic;
     font-weight: 800;
-}
-
-[data-theme="dark"] .title-accent {
-    color: var(--accent-hover);
+    background: linear-gradient(90deg, #4285F4 0%, #EA4335 40%, #FBBC04 72%, #34A853 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
 }
 
 .last-updated {
@@ -584,14 +584,14 @@ button:focus-visible,
 }
 
 .accent-dot[data-accent="teal"] { --dot: #0f8f83; }
-.accent-dot[data-accent="indigo"] { --dot: #4f46e5; }
-.accent-dot[data-accent="amber"] { --dot: #b45309; }
-.accent-dot[data-accent="rose"] { --dot: #be123c; }
+.accent-dot[data-accent="indigo"] { --dot: #1a73e8; }
+.accent-dot[data-accent="amber"] { --dot: #e37400; }
+.accent-dot[data-accent="rose"] { --dot: #d93025; }
 
 [data-theme="dark"] .accent-dot[data-accent="teal"] { --dot: #2dd4bf; }
-[data-theme="dark"] .accent-dot[data-accent="indigo"] { --dot: #a5b4fc; }
-[data-theme="dark"] .accent-dot[data-accent="amber"] { --dot: #fbbf24; }
-[data-theme="dark"] .accent-dot[data-accent="rose"] { --dot: #fb7185; }
+[data-theme="dark"] .accent-dot[data-accent="indigo"] { --dot: #8ab4f8; }
+[data-theme="dark"] .accent-dot[data-accent="amber"] { --dot: #fbbc04; }
+[data-theme="dark"] .accent-dot[data-accent="rose"] { --dot: #f28b82; }
 
 .btn-refresh.refreshing .icon-refresh { animation: spin 1s linear infinite; }
 
