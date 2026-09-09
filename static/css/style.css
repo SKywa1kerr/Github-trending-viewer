@@ -8,11 +8,11 @@
 :root {
     color-scheme: light;
 
-    /* Warm neutral backgrounds — primary < secondary(recessed) contrast with cards */
-    --bg-primary: #f7f4ee;
-    --bg-secondary: #efe9de;
+    /* Warm neutral backgrounds — page sits deeper than cards so white cards pop */
+    --bg-primary: #eae2d1;
+    --bg-secondary: #e0d7c4;
     --bg-card: #ffffff;
-    --bg-card-hover: #fffaf1;
+    --bg-card-hover: #fffdf8;
     --bg-elevated: #ffffff;
 
     /* Typography colors — all three levels clear 4.5:1 on card backgrounds */
@@ -58,12 +58,12 @@
     --tint-3: rgba(3, 105, 161, 0.07);
     --tint-4: rgba(124, 58, 237, 0.07);
 
-    /* Borders & shadows */
-    --border: #e3ddd2;
-    --border-strong: #cdc5b8;
-    --shadow-sm: 0 1px 2px rgba(28, 25, 23, 0.05);
-    --shadow-card: 0 1px 2px rgba(28, 25, 23, 0.04), 0 10px 30px -12px rgba(28, 25, 23, 0.12);
-    --shadow-card-hover: 0 2px 4px rgba(28, 25, 23, 0.04), 0 18px 44px -12px rgba(28, 25, 23, 0.18);
+    /* Borders & shadows — slightly firmer so cards read as distinct surfaces */
+    --border: #d8cfbd;
+    --border-strong: #c0b5a2;
+    --shadow-sm: 0 1px 2px rgba(28, 25, 23, 0.06);
+    --shadow-card: 0 1px 2px rgba(28, 25, 23, 0.06), 0 14px 34px -16px rgba(28, 25, 23, 0.22);
+    --shadow-card-hover: 0 2px 4px rgba(28, 25, 23, 0.06), 0 22px 50px -16px rgba(28, 25, 23, 0.28);
     --shadow-float: 0 24px 64px rgba(28, 25, 23, 0.12);
     --shadow-header: 0 12px 30px rgba(28, 25, 23, 0.07);
     --card-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.7);
