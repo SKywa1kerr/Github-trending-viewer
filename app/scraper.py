@@ -1,5 +1,6 @@
 import json
 import asyncio
+import re
 import time
 from bs4 import BeautifulSoup
 from app.config import config
@@ -220,6 +221,32 @@ async def run_full_scrape():
     logger.info("Scrape complete")
 
 
+_WORD_RE_CACHE: dict[str, "re.Pattern[str]"] = {}
+
+
+def _topic_matches_description(topic: str, description: str) -> bool:
+    """Whole-word match so 'tool' does not hit 'toolkit' and 'cli' does not hit 'client'."""
+    pattern = _WORD_RE_CACHE.get(topic)
+    if pattern is None:
+        words = [re.escape(part) for part in topic.split("-") if part]
+        pattern = re.compile(r"(?<![a-z0-9])" + r"[\s-]+".join(words) + r"(?![a-z0-9])", re.IGNORECASE)
+        _WORD_RE_CACHE[topic] = pattern
+    return bool(pattern.search(description))
+
+
+def classify_project(topics: list[str], description: str) -> str | None:
+    """Return the first category whose topics match the project, or None."""
+    topic_set = {t.lower() for t in topics}
+    for cat_key, cat_info in config.CATEGORIES.items():
+        if any(t in topic_set for t in cat_info["topics"]):
+            return cat_key
+    desc = (description or "").lower()
+    for cat_key, cat_info in config.CATEGORIES.items():
+        if any(_topic_matches_description(t, desc) for t in cat_info["topics"]):
+            return cat_key
+    return None
+
+
 def _reclassify_projects():
     conn = get_connection()
     rows = conn.execute(
@@ -227,20 +254,11 @@ def _reclassify_projects():
     ).fetchall()
     for row in rows:
         topics = json.loads(row["topics"]) if row["topics"] else []
-        desc = (row["description"] or "").lower()
-        for cat_key, cat_info in config.CATEGORIES.items():
-            # 通过 topics 或 description 关键词匹配分类
-            if any(t in cat_info["topics"] for t in topics):
-                conn.execute(
-                    "UPDATE projects SET category = ? WHERE id = ?",
-                    (cat_key, row["id"])
-                )
-                break
-            elif any(t in desc for t in cat_info["topics"]):
-                conn.execute(
-                    "UPDATE projects SET category = ? WHERE id = ?",
-                    (cat_key, row["id"])
-                )
-                break
+        category = classify_project(topics, row["description"] or "")
+        if category:
+            conn.execute(
+                "UPDATE projects SET category = ? WHERE id = ?",
+                (category, row["id"])
+            )
     conn.commit()
     conn.close()

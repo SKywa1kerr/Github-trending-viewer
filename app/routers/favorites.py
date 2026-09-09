@@ -98,5 +98,5 @@ def remove_favorite(project_id: int):
 
 
 def _one_day_ago():
-    from datetime import datetime, timedelta
-    return (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")

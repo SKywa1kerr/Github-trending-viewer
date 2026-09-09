@@ -34,14 +34,18 @@ def update_all_scores():
     from app.database import get_connection
     import json
     conn = get_connection()
-    rows = conn.execute("SELECT id, stars, stars_gained, last_updated, topics FROM projects").fetchall()
+    rows = conn.execute(
+        "SELECT id, stars, stars_gained, last_updated, topics, readme_summary_zh, readme_fetched_at FROM projects"
+    ).fetchall()
     for row in rows:
         topics = json.loads(row["topics"]) if row["topics"] else []
+        # README 质量信号：已生成中文摘要，或抓取过 README 并成功翻译
+        has_readme = bool((row["readme_summary_zh"] or "").strip())
         score = compute_score(
             stars=row["stars"],
             stars_gained=row["stars_gained"],
             last_updated=row["last_updated"],
-            has_readme=True,  # 如果有 readme_summary_zh 则认为有
+            has_readme=has_readme,
             has_topics=len(topics) > 0
         )
         conn.execute("UPDATE projects SET score = ? WHERE id = ?", (score, row["id"]))

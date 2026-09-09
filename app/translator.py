@@ -1,11 +1,10 @@
 import asyncio
 import hashlib
-import json
 import logging
-import re
 import time
 from datetime import datetime, timedelta, timezone
 
+from app.ai_client import extract_json_object, extract_message_content
 from app.config import config
 from app.database import get_connection
 from app.state_store import get_runtime_value, set_runtime_state
@@ -40,14 +39,7 @@ def build_translate_prompt(repo_name: str, description: str, readme: str) -> str
 
 
 def parse_translate_response(text: str) -> dict:
-    default = {"description_zh": "", "readme_summary_zh": ""}
-    md_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text or "", re.DOTALL)
-    if md_match:
-        text = md_match.group(1)
-    try:
-        data = json.loads(text)
-    except (json.JSONDecodeError, TypeError):
-        return default
+    data = extract_json_object(text)
     return {
         "description_zh": _normalize_translation_value(data.get("description_zh")),
         "readme_summary_zh": _normalize_translation_value(data.get("readme_summary_zh")),
@@ -136,7 +128,7 @@ async def translate_project(repo_name: str, description: str, readme: str) -> di
     try:
         await _wait_for_translation_rate_limit()
         data = await provider.translate(prompt)
-        content = data["choices"][0]["message"]["content"]
+        content = extract_message_content(data)
         usage = data.get("usage", {})
         _add_daily_tokens_used(usage.get("total_tokens", 0))
     except Exception as exc:

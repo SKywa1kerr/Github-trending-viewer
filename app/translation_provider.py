@@ -19,6 +19,7 @@ class OpenAICompatibleTranslationProvider:
             messages=[{"role": "user", "content": prompt}],
             temperature=temperature,
             max_tokens=config.TRANSLATION_MAX_OUTPUT_TOKENS,
+            json_mode=True,
         )
 
 

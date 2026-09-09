@@ -15,6 +15,10 @@ def temp_db(monkeypatch):
     if os.path.exists(db_path):
         os.remove(db_path)
     monkeypatch.setattr(cfg.config, "DB_PATH", db_path)
+    # Never hit the real model gateway from tests.
+    monkeypatch.setattr(cfg.config, "AI_MODEL_CHECK", False)
+    from app.routers.system import reset_model_check_cache
+    reset_model_check_cache()
     from app.database import init_db
     init_db()
     yield db_path
@@ -333,11 +337,11 @@ def test_recommendations_uses_shared_ai_client_when_cache_misses(client, monkeyp
     set_runtime_state(recommendation_fav_hash="", recommendation_generated_at="")
 
     class FakeAIClient:
-        async def chat_completion(self, messages, temperature=0.3, max_tokens=None):
+        async def chat_completion(self, messages, temperature=0.3, max_tokens=None, **kwargs):
             return {
                 "choices": [{
                     "message": {
-                        "content": '[{"repo":"candidate/repo","reason":"AI reason","score":88}]',
+                        "content": '{"recommendations": [{"repo":"candidate/repo","reason":"AI reason","score":88}]}',
                     },
                 }],
             }
@@ -472,3 +476,115 @@ def test_favorites_api_returns_translation_state_fields(client):
     item = resp.json()["items"][0]
     assert item["translation_status"] == "failed"
     assert item["translation_attempts"] == 3
+
+
+def test_get_health_flags_model_missing_from_endpoint(client, monkeypatch):
+    from app.routers.system import reset_model_check_cache
+
+    monkeypatch.setattr(cfg.config, "API_KEY", "test-key")
+    monkeypatch.setattr(cfg.config, "API_MODEL", "glm")
+    monkeypatch.setattr(cfg.config, "AI_MODEL_CHECK", True)
+    monkeypatch.setattr("app.ai_client.list_available_models", lambda timeout=8.0: ["qwen", "deepseek-chat"])
+    reset_model_check_cache()
+
+    resp = client.get("/api/health")
+    assert resp.status_code == 200
+
+    data = resp.json()
+    check = data["checks"]["model_available"]
+    assert check["ok"] is False
+    assert check["available_models"] == ["qwen", "deepseek-chat"]
+    assert any(p.startswith("Model 'glm' is not available") for p in data["problems"])
+
+
+def test_get_health_accepts_configured_model_and_caches_lookup(client, monkeypatch):
+    from app.routers.system import reset_model_check_cache
+
+    calls = []
+
+    def fake_list(timeout=8.0):
+        calls.append(1)
+        return ["qwen", "qwen3.8-27b"]
+
+    monkeypatch.setattr(cfg.config, "API_KEY", "test-key")
+    monkeypatch.setattr(cfg.config, "API_MODEL", "qwen")
+    monkeypatch.setattr(cfg.config, "AI_MODEL_CHECK", True)
+    monkeypatch.setattr("app.ai_client.list_available_models", fake_list)
+    reset_model_check_cache()
+
+    first = client.get("/api/health").json()
+    second = client.get("/api/health").json()
+
+    assert first["checks"]["model_available"]["ok"] is True
+    assert second["checks"]["model_available"]["ok"] is True
+    assert len(calls) == 1
+
+
+def test_get_health_does_not_fail_when_models_endpoint_unreachable(client, monkeypatch):
+    from app.routers.system import reset_model_check_cache
+
+    def broken_list(timeout=8.0):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(cfg.config, "API_KEY", "test-key")
+    monkeypatch.setattr(cfg.config, "AI_MODEL_CHECK", True)
+    monkeypatch.setattr("app.ai_client.list_available_models", broken_list)
+    reset_model_check_cache()
+
+    data = client.get("/api/health").json()
+    check = data["checks"]["model_available"]
+
+    assert check["ok"] is True
+    assert "unreachable" in check["skipped"]
+
+
+def test_do_refresh_sets_refreshing_flag_for_scheduled_runs(monkeypatch):
+    from app.routers import system
+    from app.state_store import get_runtime_bool, set_runtime_state
+
+    set_runtime_state(is_refreshing="0")
+    observed = {}
+
+    async def fake_scrape():
+        observed["during"] = get_runtime_bool("is_refreshing")
+
+    monkeypatch.setattr("app.scraper.run_full_scrape", fake_scrape)
+    monkeypatch.setattr("app.scorer.update_all_scores", lambda: None)
+    monkeypatch.setattr("app.translator.start_translation_worker", lambda: True)
+
+    asyncio.run(system._do_refresh())
+
+    assert observed["during"] is True
+    assert get_runtime_bool("is_refreshing") is False
+
+
+def test_star_history_batch_returns_most_recent_points(client):
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO projects (repo_full_name, repo_url) VALUES (?, ?)",
+        ("trend/repo", "https://github.com/trend/repo"),
+    )
+    project_id = conn.execute(
+        "SELECT id FROM projects WHERE repo_full_name = ?", ("trend/repo",)
+    ).fetchone()["id"]
+    for date, stars in (("2026-06-01", 100), ("2026-06-02", 120), ("2026-06-03", 150)):
+        conn.execute(
+            "INSERT INTO star_history (project_id, stars, recorded_date) VALUES (?, ?, ?)",
+            (project_id, stars, date),
+        )
+    conn.commit()
+    conn.close()
+
+    resp = client.get(f"/api/star-history?ids={project_id},abc,&points=2")
+    assert resp.status_code == 200
+
+    # newest two points, returned oldest -> newest so the sparkline reads left to right
+    assert resp.json() == {
+        str(project_id): [
+            {"date": "2026-06-02", "stars": 120},
+            {"date": "2026-06-03", "stars": 150},
+        ]
+    }
+
+    everything = client.get(f"/api/star-history?ids={project_id}").json()
+    assert len(everything[str(project_id)]) == 3

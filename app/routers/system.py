@@ -1,4 +1,5 @@
 import asyncio
+import time
 from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks
 from app.database import get_connection
@@ -49,6 +50,57 @@ def _get_latest_fetched_at() -> str:
     ).fetchone()
     conn.close()
     return row["fetched_at"] if row else ""
+
+
+_MODEL_CHECK_TTL_SECONDS = 600
+_model_check_cache: dict = {"key": None, "checked_at": 0.0, "result": None}
+
+
+def _check_model_available(config, api_key_ok: bool) -> dict:
+    """Confirm API_MODEL is listed by the endpoint's /models. Cached to avoid hammering the gateway."""
+    from app.ai_client import list_available_models
+
+    if not config.AI_MODEL_CHECK:
+        return {"ok": True, "model": config.API_MODEL, "skipped": "disabled"}
+    if not api_key_ok:
+        return {"ok": True, "model": config.API_MODEL, "skipped": "no api key"}
+
+    cache_key = (config.API_ENDPOINT, config.API_MODEL, config.API_KEY)
+    now = time.monotonic()
+    if (
+        _model_check_cache["key"] == cache_key
+        and _model_check_cache["result"] is not None
+        and now - _model_check_cache["checked_at"] < _MODEL_CHECK_TTL_SECONDS
+    ):
+        return _model_check_cache["result"]
+
+    try:
+        models = list_available_models()
+    except Exception as exc:
+        # Cannot reach /models: don't block on it, but surface the reason.
+        result = {
+            "ok": True,
+            "model": config.API_MODEL,
+            "skipped": f"models endpoint unreachable: {str(exc)[:120]}",
+        }
+    else:
+        available = config.API_MODEL in models
+        result = {
+            "ok": available,
+            "model": config.API_MODEL,
+            "available_models": models,
+        }
+        if not available:
+            result["problem"] = (
+                f"Model '{config.API_MODEL}' is not available on the endpoint; "
+                f"available: {', '.join(models) or 'none'}"
+            )
+    _model_check_cache.update(key=cache_key, checked_at=now, result=result)
+    return result
+
+
+def reset_model_check_cache():
+    _model_check_cache.update(key=None, checked_at=0.0, result=None)
 
 
 def _build_data_freshness(latest_fetched_at: str, stale_after_hours: int) -> dict:
@@ -146,6 +198,10 @@ def get_health():
     if not api_key_ok:
         problems.append("API_KEY is not configured")
 
+    checks["model_available"] = _check_model_available(config, api_key_ok)
+    if not checks["model_available"]["ok"]:
+        problems.append(checks["model_available"]["problem"])
+
     github_token_ok = bool((config.GITHUB_TOKEN or "").strip())
     checks["github_token"] = {"ok": github_token_ok}
     if not github_token_ok:
@@ -188,7 +244,7 @@ async def _do_refresh():
         from app.scraper import run_full_scrape
         from app.translator import start_translation_worker
         from app.scorer import update_all_scores
-        set_runtime_state(last_refresh_error="")
+        set_runtime_state(is_refreshing="1", last_refresh_error="")
         set_progress("scraping")
         logger.info("Starting scrape...")
         await run_full_scrape()

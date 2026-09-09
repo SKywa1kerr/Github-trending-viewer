@@ -1,9 +1,11 @@
+import hashlib
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from app.ai_client import build_ai_client, extract_json_array
+from app.ai_client import build_ai_client, extract_json_array, extract_json_object, extract_message_content
 from app.database import get_connection
 from app.models import ProjectImportIn
 from app.scraper import fetch_readme, fetch_search_results, save_projects
@@ -137,18 +139,21 @@ def import_project(project: ProjectImportIn):
 
 
 @router.get("/star-history")
-def get_star_history_batch(ids: str = Query(...)):
-    """Get star history for multiple projects. ids=1,2,3"""
-    project_ids = [int(x) for x in ids.split(",") if x.strip().isdigit()]
+def get_star_history_batch(ids: str = Query(...), points: int = Query(30, ge=2, le=365)):
+    """Get the most recent N star-history points for multiple projects. ids=1,2,3"""
+    project_ids = [int(x) for x in ids.split(",") if x.strip().isdigit()][:100]
     if not project_ids:
         return {}
     conn = get_connection()
     result = {}
     placeholders = ",".join("?" * len(project_ids))
     rows = conn.execute(
-        f"SELECT project_id, stars, recorded_date FROM star_history "
-        f"WHERE project_id IN ({placeholders}) ORDER BY recorded_date",
-        project_ids
+        f"SELECT project_id, stars, recorded_date FROM ("
+        f"  SELECT project_id, stars, recorded_date,"
+        f"         ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY recorded_date DESC) AS rn"
+        f"  FROM star_history WHERE project_id IN ({placeholders})"
+        f") WHERE rn <= ? ORDER BY project_id, recorded_date",
+        [*project_ids, points]
     ).fetchall()
     conn.close()
     for r in rows:
@@ -186,9 +191,6 @@ async def search_github(q: str = Query(..., min_length=1)):
             "is_new": False,
         })
     return {"total": len(items), "page": 1, "page_size": len(items), "items": items}
-
-
-import hashlib
 
 
 @router.get("/recommendations")
@@ -286,7 +288,7 @@ async def get_recommendations(force: bool = Query(False)):
 {candidate_text}
 
 请从中选出最值得推荐的10个项目，按推荐度排序。对每个项目用一句简短的中文说明为什么推荐（结合用户兴趣）。
-返回JSON数组格式: [{{"repo":"owner/name","reason":"推荐理由","score":95}}]
+返回 JSON 对象，格式: {{"recommendations": [{{"repo":"owner/name","reason":"推荐理由","score":95}}]}}
 只返回JSON，不要其他内容。"""
 
     recommendations = []
@@ -295,11 +297,18 @@ async def get_recommendations(force: bool = Query(False)):
         data = await client.chat_completion(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
+            json_mode=True,
         )
-        content = data["choices"][0]["message"]["content"]
-        recommendations = extract_json_array(content)
+        recommendations = extract_json_array(extract_message_content(data))
+        if not recommendations:
+            # json_object mode may wrap the array in an object, e.g. {"recommendations": [...]}
+            wrapped = extract_json_object(extract_message_content(data))
+            for value in wrapped.values():
+                if isinstance(value, list):
+                    recommendations = value
+                    break
     except Exception:
-        pass
+        logging.getLogger("recommendations").warning("AI re-ranking failed; using tag-based fallback", exc_info=True)
 
     # Save to DB
     conn.execute("DELETE FROM recommendations")

@@ -8,7 +8,12 @@ class Config:
     GITHUB_BACKOFF_SECONDS: float = float(os.getenv("GITHUB_BACKOFF_SECONDS", "1"))
     API_ENDPOINT: str = os.getenv("API_ENDPOINT", "https://models.sjtu.edu.cn/api/v1/chat/completions")
     API_KEY: str = os.getenv("API_KEY", "")
-    API_MODEL: str = os.getenv("API_MODEL", "deepseek-chat")
+    # SJTU "致远一号" gateway alias; routes to the current Qwen deployment (qwen3.8-27b as of 2026-09).
+    API_MODEL: str = os.getenv("API_MODEL", "qwen")
+    # Ask OpenAI-compatible endpoints for response_format=json_object on structured tasks.
+    AI_JSON_MODE: bool = os.getenv("AI_JSON_MODE", "1").strip().lower() not in ("0", "false", "no", "")
+    # Verify the configured model exists via /models during health checks.
+    AI_MODEL_CHECK: bool = os.getenv("AI_MODEL_CHECK", "1").strip().lower() not in ("0", "false", "no", "")
     TRANSLATION_PROVIDER: str = os.getenv("TRANSLATION_PROVIDER", "openai-compatible")
     TRANSLATION_MODEL: str = os.getenv("TRANSLATION_MODEL", API_MODEL)
     TRANSLATION_TIMEOUT_SECONDS: int = int(os.getenv("TRANSLATION_TIMEOUT_SECONDS", "60"))

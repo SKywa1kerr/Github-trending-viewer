@@ -362,3 +362,73 @@ def test_start_translation_worker_updates_runtime_state(monkeypatch):
         assert get_runtime_bool("translation_worker_running") is False
 
     asyncio.run(scenario())
+
+
+def test_parse_translate_response_tolerates_think_tags_and_prose():
+    response = (
+        "<think>Let me translate.</think>\n"
+        "Here you go:\n"
+        '{"description_zh": "一个命令行工具", "readme_summary_zh": ["功能一", "功能二"]}\n'
+        "Hope this helps."
+    )
+
+    result = parse_translate_response(response)
+
+    assert result["description_zh"] == "一个命令行工具"
+    assert result["readme_summary_zh"] == "功能一\n功能二"
+
+
+def test_translate_project_requests_json_mode_and_strips_thinking(monkeypatch):
+    from app.translator import translate_project
+
+    captured = {}
+
+    class FakeClient:
+        async def chat_completion(self, messages, *, temperature=0.3, max_tokens=None, json_mode=False):
+            captured["json_mode"] = json_mode
+            captured["max_tokens"] = max_tokens
+            return {
+                "choices": [{"message": {
+                    "reasoning_content": "hidden reasoning",
+                    "content": '<think>x</think>{"description_zh": "简介", "readme_summary_zh": "摘要"}',
+                }}],
+                "usage": {"total_tokens": 10},
+            }
+
+    class FakeProvider:
+        def __init__(self):
+            self.client = FakeClient()
+
+        async def translate(self, prompt, temperature=0.3):
+            return await self.client.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=cfg.config.TRANSLATION_MAX_OUTPUT_TOKENS,
+                json_mode=True,
+            )
+
+    monkeypatch.setattr("app.translator.build_translation_provider", lambda: FakeProvider())
+
+    result = asyncio.run(translate_project("x/y", "desc", "readme"))
+
+    assert captured["json_mode"] is True
+    assert captured["max_tokens"] == cfg.config.TRANSLATION_MAX_OUTPUT_TOKENS
+    assert result == {"description_zh": "简介", "readme_summary_zh": "摘要"}
+
+
+def test_openai_provider_requests_json_mode(monkeypatch):
+    from app.translation_provider import OpenAICompatibleTranslationProvider
+
+    captured = {}
+
+    class FakeClient:
+        async def chat_completion(self, messages, *, temperature=0.3, max_tokens=None, json_mode=False):
+            captured["json_mode"] = json_mode
+            return {"choices": [{"message": {"content": "{}"}}]}
+
+    provider = OpenAICompatibleTranslationProvider(endpoint="e", api_key="k", model="qwen")
+    provider.client = FakeClient()
+
+    asyncio.run(provider.translate("prompt"))
+
+    assert captured["json_mode"] is True

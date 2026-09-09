@@ -79,6 +79,40 @@ MAX_DAILY_TOKENS=1000000
 
 翻译、AI 推荐和项目问答都通过 `app/ai_client.py` 访问 OpenAI-compatible 接口。后续更换模型、调整代理、超时或错误处理时，优先改这个统一客户端，避免不同功能各自维护一套模型请求逻辑。
 
+当前默认模型是交大"致远一号"网关上的 Qwen（`qwen3.8-27b`）。相关配置：
+
+```env
+API_ENDPOINT=https://models.sjtu.edu.cn/api/v1/chat/completions
+API_MODEL=qwen
+AI_JSON_MODE=1
+AI_MODEL_CHECK=1
+```
+
+- `API_MODEL` 建议填网关别名 `qwen`，而不是带版本的 `qwen3.8-27b`。带版本的部署名经常处于冷却状态并返回 `429 No deployments available`，别名会自动路由到可用部署。
+- `AI_JSON_MODE=1` 时，翻译和推荐请求会附带 `response_format=json_object`，输出更稳定也更快。接口若不支持会自动退回普通请求。
+- `AI_MODEL_CHECK=1` 时，`/api/health` 会调用网关的 `/models` 确认 `API_MODEL` 仍然存在，模型下线后页面的"系统诊断"会直接提示。结果缓存 10 分钟。
+- 客户端会自动剥离思考模型可能输出的 `<think>` 段落，并忽略 `reasoning_content` 字段，切换到推理模型也不需要改解析逻辑。
+
+查看网关当前可用模型：
+
+```powershell
+Invoke-RestMethod -Uri "https://models.sjtu.edu.cn/api/v1/models" -Headers @{ Authorization = "Bearer $env:API_KEY" } | Select-Object -ExpandProperty data | Select-Object id
+```
+
+## Star 趋势
+
+每次抓取都会把当天的 star 数写入 `star_history` 表。卡片上的星数旁会显示最近 30 次记录的迷你趋势线，绿色上升、红色下降、灰色持平；不足两条记录时不显示。数据通过 `GET /api/star-history?ids=1,2,3&points=30` 批量读取。
+
+## 本地测试
+
+```powershell
+python -m pytest -q
+node tests/test_frontend_security.mjs
+node tests/test_frontend_helpers.mjs
+node tests/test_responsive_css.mjs
+node --check static/js/app.js
+```
+
 ## 常用命令
 
 ```powershell
