@@ -334,12 +334,13 @@ button:focus-visible,
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 30px 38px;
-    margin: 0 -28px 18px;
+    padding: 40px 48px;
+    margin: 0 -28px 20px;
     background: linear-gradient(180deg, var(--header-bg), var(--bg-card));
     position: relative;
     overflow: hidden;
-    border-radius: 0 0 18px 18px;
+    border-radius: 0 0 20px 20px;
+    border-bottom: 1px solid var(--border);
     box-shadow: var(--shadow-header);
 }
 
@@ -375,19 +376,20 @@ button:focus-visible,
 
 .title-kicker {
     color: var(--header-muted);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
-    letter-spacing: 0.16em;
-    margin-bottom: 2px;
+    letter-spacing: 0.22em;
+    margin-bottom: 4px;
     text-transform: uppercase;
 }
 
 .title {
     font-family: 'Fraunces', 'Noto Sans SC', Georgia, serif;
-    font-size: 30px;
+    font-size: 42px;
+    line-height: 1.05;
     font-weight: 700;
     color: var(--header-text);
-    letter-spacing: -0.02em;
+    letter-spacing: -0.03em;
     font-optical-sizing: auto;
 }
 
@@ -416,13 +418,13 @@ button:focus-visible,
 .overview {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-    margin-bottom: 18px;
+    gap: 14px;
+    margin-bottom: 20px;
 }
 
 .overview-card {
-    min-height: 86px;
-    padding: 16px 18px;
+    min-height: 92px;
+    padding: 18px 20px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background:
@@ -936,13 +938,13 @@ button:focus-visible,
 .btn-github-search:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
 /* ========== Project Cards ========== */
-.project-list { display: flex; flex-direction: column; gap: 10px; }
+.project-list { display: flex; flex-direction: column; gap: 12px; }
 
 .project-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 18px 20px;
+    padding: 22px 24px;
     box-shadow: var(--shadow-surface);
     transition: all var(--transition-slow);
     position: relative;
@@ -1842,7 +1844,7 @@ button:focus-visible,
         padding: 20px 24px;
         margin: 0 -16px 24px;
     }
-    .title { font-size: 22px; }
+    .title { font-size: 28px; }
     .header-right {
         width: 100%;
         min-width: 0;
