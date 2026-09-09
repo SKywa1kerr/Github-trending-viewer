@@ -8,27 +8,27 @@
 :root {
     color-scheme: light;
 
-    /* Warm neutral backgrounds — page sits deeper than cards so white cards pop */
-    --bg-primary: #eae2d1;
-    --bg-secondary: #e0d7c4;
+    /* Cool neutral backgrounds — page is a soft gray-blue so white cards float cleanly */
+    --bg-primary: #f3f4f6;
+    --bg-secondary: #e9ebef;
     --bg-card: #ffffff;
-    --bg-card-hover: #fffdf8;
+    --bg-card-hover: #fbfcfe;
     --bg-elevated: #ffffff;
 
-    /* Typography colors — all three levels clear 4.5:1 on card backgrounds */
-    --text-primary: #1c1917;
-    --text-secondary: #57534e;
-    --text-muted: #6f6862;
+    /* Typography colors — cool slate, all three levels clear 4.5:1 on card backgrounds */
+    --text-primary: #111827;
+    --text-secondary: #4b5563;
+    --text-muted: #6b7280;
 
-    /* Accent — preset driven, switched by [data-accent] on <html> */
-    --accent: #0f8f83;
-    --accent-hover: #0c6f67;
+    /* Accent — preset driven, switched by [data-accent] on <html>; indigo is default */
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
     --accent-contrast: #ffffff;
-    --accent-rgb: 13, 148, 136;
-    --accent-alt: #0369a1;
-    --accent-soft: rgba(var(--accent-rgb), 0.09);
-    --accent-medium: rgba(var(--accent-rgb), 0.2);
-    --accent-glow: rgba(var(--accent-rgb), 0.24);
+    --accent-rgb: 79, 70, 229;
+    --accent-alt: #7c3aed;
+    --accent-soft: rgba(var(--accent-rgb), 0.08);
+    --accent-medium: rgba(var(--accent-rgb), 0.18);
+    --accent-glow: rgba(var(--accent-rgb), 0.22);
 
     /* Semantic colors — each ships a fill, a soft surface and a border */
     --success: #15803d;
@@ -58,15 +58,15 @@
     --tint-3: rgba(3, 105, 161, 0.07);
     --tint-4: rgba(124, 58, 237, 0.07);
 
-    /* Borders & shadows — slightly firmer so cards read as distinct surfaces */
-    --border: #d8cfbd;
-    --border-strong: #c0b5a2;
-    --shadow-sm: 0 1px 2px rgba(28, 25, 23, 0.06);
-    --shadow-card: 0 1px 2px rgba(28, 25, 23, 0.06), 0 14px 34px -16px rgba(28, 25, 23, 0.22);
-    --shadow-card-hover: 0 2px 4px rgba(28, 25, 23, 0.06), 0 22px 50px -16px rgba(28, 25, 23, 0.28);
-    --shadow-float: 0 24px 64px rgba(28, 25, 23, 0.12);
-    --shadow-header: 0 12px 30px rgba(28, 25, 23, 0.07);
-    --card-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    /* Borders & shadows — cool-tinted, subtle but enough to separate surfaces */
+    --border: #e4e7ec;
+    --border-strong: #d2d6dd;
+    --shadow-sm: 0 1px 2px rgba(17, 24, 39, 0.06);
+    --shadow-card: 0 1px 2px rgba(17, 24, 39, 0.05), 0 12px 30px -14px rgba(17, 24, 39, 0.16);
+    --shadow-card-hover: 0 2px 4px rgba(17, 24, 39, 0.05), 0 20px 46px -16px rgba(17, 24, 39, 0.22);
+    --shadow-float: 0 24px 64px rgba(17, 24, 39, 0.14);
+    --shadow-header: 0 12px 30px rgba(17, 24, 39, 0.07);
+    --card-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
     /* Raised surface = drop shadow + a hairline top highlight, reads as thickness */
     --shadow-surface: var(--shadow-card), var(--card-highlight);
     --shadow-surface-hover: var(--shadow-card-hover), var(--card-highlight);
@@ -82,25 +82,25 @@
     /* Special */
     --tag-bg: rgba(var(--accent-rgb), 0.08);
     --tag-text: var(--accent);
-    --readme-bg: #fafaf9;
-    --readme-border: #e7e5e4;
-    --readme-accent: #b45309;
-    --readme-marker-bg: #f5c168;
-    --readme-marker-text: #3b2813;
+    --readme-bg: #f8fafc;
+    --readme-border: #e5e8ec;
+    --readme-accent: var(--accent);
+    --readme-marker-bg: #fde68a;
+    --readme-marker-text: #422006;
 
-    /* Header follows the theme — paper-light in light mode, deep in dark mode */
-    --header-bg: #fffdf9;
+    /* Header follows the theme — clean white in light mode, deep in dark mode */
+    --header-bg: #ffffff;
     --header-text: var(--text-primary);
     --header-muted: var(--text-muted);
     --header-border: var(--border);
-    --header-line: rgba(28, 25, 23, 0.03);
+    --header-line: rgba(17, 24, 39, 0.04);
     --header-glow: rgba(var(--accent-rgb), 0.1);
-    --header-btn-bg: rgba(28, 25, 23, 0.04);
-    --header-btn-border: rgba(28, 25, 23, 0.1);
+    --header-btn-bg: rgba(17, 24, 39, 0.04);
+    --header-btn-border: rgba(17, 24, 39, 0.1);
     --header-btn-text: var(--text-secondary);
     --header-btn-hover-bg: rgba(var(--accent-rgb), 0.1);
     --header-btn-hover-text: var(--accent);
-    --noise-opacity: 0.28;
+    --noise-opacity: 0.14;
     --noise: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
 }
 
@@ -184,6 +184,14 @@
 /* ========== Accent presets ==========
    Each preset only declares the five accent primitives; the soft/medium/glow
    fills are derived from --accent-rgb so they follow automatically. */
+[data-accent="teal"] {
+    --accent: #0f8f83;
+    --accent-hover: #0c6f67;
+    --accent-contrast: #ffffff;
+    --accent-rgb: 13, 148, 136;
+    --accent-alt: #0369a1;
+}
+
 [data-accent="indigo"] {
     --accent: #4f46e5;
     --accent-hover: #4338ca;
@@ -206,6 +214,14 @@
     --accent-contrast: #ffffff;
     --accent-rgb: 190, 18, 60;
     --accent-alt: #db2777;
+}
+
+[data-theme="dark"][data-accent="teal"] {
+    --accent: #2dd4bf;
+    --accent-hover: #5eead4;
+    --accent-contrast: #05211e;
+    --accent-rgb: 45, 212, 191;
+    --accent-alt: #38bdf8;
 }
 
 [data-theme="dark"][data-accent="indigo"] {
@@ -244,7 +260,7 @@
 body {
     font-family: 'Outfit', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
     background:
-        linear-gradient(180deg, rgba(255, 252, 246, 0.92), rgba(247, 244, 238, 0.96) 260px),
+        linear-gradient(180deg, #fbfcfe 0%, var(--bg-primary) 300px),
         var(--bg-primary);
     color: var(--text-primary);
     line-height: 1.6;
@@ -1304,7 +1320,7 @@ button:focus-visible,
 .modal {
     position: fixed;
     inset: 0;
-    background: rgba(28, 25, 23, 0.45);
+    background: rgba(17, 24, 39, 0.42);
     display: flex;
     align-items: center;
     justify-content: center;
