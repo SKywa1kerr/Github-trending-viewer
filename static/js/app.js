@@ -1,6 +1,7 @@
 import { escapeHtml, formatChatText, safeExternalUrl } from './sanitize.mjs?v=42';
 import { hasDiscoverySpotlight, hydrateProjectAvatars, normalizeProjectCategory, renderProjectCardContents } from './cards.mjs?v=42';
 import { renderProjectReading } from './reader.mjs?v=42';
+import { bindMotionFeedback, showDialogMotion, closeDialogMotion } from './motion.mjs?v=60';
 import {
     categoryNames, icon, formatStars, buildModeState, buildResultContext,
     formatTranslationSummary, renderSparkline, timeAgo, readmeHighlights,
@@ -64,6 +65,7 @@ async function init() {
     updateModeUI();
     $('loading-screen').classList.add('hidden');
     $('main-content').classList.remove('hidden');
+    bindMotionFeedback();
     if (/Mac|iPhone|iPad/.test(navigator.platform)) $('search-shortcut').textContent = '⌘ K';
     await Promise.allSettled([loadProjects(), checkStatus(), checkHealth(), loadNavigation(), loadLanguages()]);
     pollingTimer = setInterval(() => { if (!document.hidden) checkStatus(); }, 5000);
@@ -82,7 +84,7 @@ function updateModeUI() {
     const category = currentCategory();
     const title = state.githubSearch ? 'GitHub 搜索' : categoryNames[category];
     const descriptions = {
-        all: '开源世界很大，找到适合你的那一部分。',
+        all: '从开源项目，到你的下一个灵感。',
         ai: '探索模型、智能体与机器学习工具。',
         tools: '让日常工作更轻松的开源工具。',
         devtools: '框架、命令行与开发基础设施。',
@@ -90,7 +92,7 @@ function updateModeUI() {
         favorites: '值得继续探索的项目，都在这里。',
         recommend: '根据你的收藏，发现可能喜欢的项目。',
     };
-    $('page-title').textContent = category === 'all' && !state.githubSearch ? '发现值得一试的项目。' : title;
+    $('page-title').textContent = title;
     $('page-subtitle').textContent = state.githubSearch ? '搜索 GitHub 上的公开项目。' : descriptions[category];
     document.title = title + ' · GitHub Trending';
     const discovery = !state.favoritesMode && !state.recommendMode && !state.githubSearch;
@@ -502,8 +504,11 @@ function updateStatusUI() {
     $('overview-total').textContent = Number(status.total_projects || 0).toLocaleString('zh-CN');
     $('overview-freshness').textContent = status.is_data_stale ? '需更新' : status.last_fetched ? '已更新' : '待初始化';
     $('overview-translations').textContent = Number(status.translation_done || 0).toLocaleString('zh-CN');
+    $('pulse-projects').textContent = $('overview-total').textContent;
+    $('pulse-translations').textContent = $('overview-translations').textContent;
     const date = parseProjectDate(status.last_fetched);
     $('last-updated').textContent = date ? '更新于 ' + timeAgo(status.last_fetched) : '等待首次更新';
+    $('pulse-freshness').textContent = $('last-updated').textContent;
     $('overview-freshness-note').textContent = date ? '上次更新：' + date.toLocaleString('zh-CN', { hour12: false }) : '尚未抓取项目。';
     $('translation-summary-detail').textContent = formatTranslationSummary(status);
     $('btn-retry-failed').disabled = !((status.translation_retry || 0) + (status.translation_failed || 0));
@@ -600,7 +605,17 @@ function applyView() {
 
 function openDialog(id) {
     const dialog = $(id);
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) {
+        dialog.showModal();
+        document.body.classList.add('has-dialog');
+        showDialogMotion(dialog);
+    }
+}
+
+function closeDialog(dialog) { closeDialogMotion(dialog); }
+
+function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
 }
 
 function closeNavigation() {
@@ -695,6 +710,7 @@ function openReader(project) {
     applyReaderSize();
     openDialog('reader-modal');
     $('reader-scroll').scrollTop = 0;
+    updateReaderProgress();
     $('reader-content').querySelector('h2').focus({ preventScroll: true });
 }
 
@@ -703,6 +719,15 @@ function applyReaderSize() {
     $('reader-size').querySelectorAll('button').forEach(button => {
         button.setAttribute('aria-pressed', String(button.dataset.readerSize === reader.size));
     });
+    requestAnimationFrame(updateReaderProgress);
+}
+
+function updateReaderProgress() {
+    const region = $('reader-scroll');
+    const travel = region.scrollHeight - region.clientHeight;
+    const progress = travel > 0 ? Math.min(1, Math.max(0, region.scrollTop / travel)) : 1;
+    $('reader-progress-fill').style.transform = 'scaleX(' + progress + ')';
+    $('reader-progress-label').textContent = '阅读进度 ' + Math.round(progress * 100) + '%';
 }
 
 function setChatBusy(busy) {
@@ -838,7 +863,7 @@ function bindEvents() {
             $('search-input').value = state.query;
             loadProjects();
             $('search-input').focus();
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+            scrollToTop();
         }
     });
     $('btn-load-more').addEventListener('click', () => loadProjects(true));
@@ -853,7 +878,7 @@ function bindEvents() {
     $('btn-refresh').addEventListener('click', refreshProjects);
     $('btn-retry-failed').addEventListener('click', retryTranslations);
     $('btn-refresh-health').addEventListener('click', checkHealth);
-    ['btn-settings', 'btn-status'].forEach(id => $(id).addEventListener('click', () => {
+    ['btn-settings', 'btn-status', 'btn-pulse-status'].forEach(id => $(id).addEventListener('click', () => {
         openDialog('settings-modal'); checkHealth(); closeNavigation();
     }));
     $('btn-add-keyword').addEventListener('click', () => {
@@ -875,13 +900,26 @@ function bindEvents() {
         $('btn-menu').setAttribute('aria-expanded', String(expanded));
         $('btn-menu').setAttribute('aria-label', expanded ? '收起导航' : '展开导航');
     });
-    document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => $(button.dataset.close).close()));
-    document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('click', event => {
+    document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => closeDialog($(button.dataset.close))));
+    document.querySelectorAll('dialog').forEach(dialog => {
+        dialog.addEventListener('cancel', event => { event.preventDefault(); closeDialog(dialog); });
+        dialog.addEventListener('close', () => {
+            if (!document.querySelector('dialog[open]')) document.body.classList.remove('has-dialog');
+        });
+        dialog.addEventListener('click', event => {
         const bounds = dialog.getBoundingClientRect();
-        if (event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) dialog.close();
-    }));
+        if (event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) closeDialog(dialog);
+        });
+    });
     $('chat-modal').addEventListener('close', () => { chat.generation++; chat.controller?.abort(); chat.controller = null; });
     $('reader-modal').addEventListener('close', () => { reader.project = null; });
+    let readerFrame = 0;
+    const scheduleReaderProgress = () => {
+        if (readerFrame) return;
+        readerFrame = requestAnimationFrame(() => { readerFrame = 0; updateReaderProgress(); });
+    };
+    $('reader-scroll').addEventListener('scroll', scheduleReaderProgress, { passive: true });
+    window.addEventListener('resize', scheduleReaderProgress);
     $('reader-size').addEventListener('click', event => {
         const button = event.target.closest('button[data-reader-size]');
         if (!button) return;
@@ -923,7 +961,7 @@ function bindEvents() {
         }
         if (event.key === 'Escape' && document.activeElement === $('search-input')) $('btn-clear-search').click();
     });
-    $('btn-back-top').addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+    $('btn-back-top').addEventListener('click', scrollToTop);
     window.addEventListener('scroll', () => $('btn-back-top').classList.toggle('visible', window.scrollY > 600), { passive: true });
 }
 

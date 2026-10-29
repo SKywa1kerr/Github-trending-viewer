@@ -7,7 +7,8 @@
     <meta name="description" content="用中文发现、了解和收藏值得关注的 GitHub 开源项目。">
     <title>发现 · GitHub Trending</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='11' fill='%230071e3'/%3E%3Cpath d='m15 13-7 7 7 7m10-14 7 7-7 7m-3-18-4 22' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="/css/style.css?v=54">
+    <link rel="preload" href="/fonts/geist-regular.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/css/style.css?v=60">
 </head>
 <body>
     <a class="skip-link" href="#project-list">跳到项目列表</a>
@@ -44,8 +45,8 @@
         <header id="site-header" class="site-header">
             <div class="header-inner">
                 <a href="/" class="brand" aria-label="GitHub Trending 首页">
-                    <span class="brand-mark"><svg class="icon"><use href="#icon-code"/></svg></span>
-                    <span class="brand-name"><span class="brand-prefix">GitHub </span>Trending</span>
+                    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M8 6v12a8 8 0 0 0 8 8h8M24 6v4a8 8 0 0 1-8 8H8"/><circle cx="8" cy="6" r="3"/><circle cx="24" cy="6" r="3"/><circle cx="24" cy="26" r="3"/></svg>
+                    <span class="brand-name">Trending<span class="brand-caption">GitHub 开源项目库</span></span>
                 </a>
                 <nav id="navigation" class="mode-nav" aria-label="主导航">
                     <button class="tab mode-tab active" type="button" data-mode="discover" data-category="all" aria-current="page">发现</button>
@@ -64,15 +65,8 @@
         <main class="workspace">
             <header class="page-header">
                 <div class="page-introduction">
-                    <svg class="branch-signature" width="108" height="28" viewBox="0 0 108 28" aria-hidden="true" focusable="false">
-                        <path d="M8 20h30c16 0 16-12 32-12h30M38 20h38"/>
-                        <circle class="branch-node branch-node-devtools" cx="8" cy="20" r="4"/>
-                        <circle class="branch-node branch-node-tools" cx="38" cy="20" r="4"/>
-                        <circle class="branch-node branch-node-other" cx="76" cy="20" r="4"/>
-                        <circle class="branch-node branch-node-ai" cx="100" cy="8" r="4"/>
-                    </svg>
-                    <h1 id="page-title">发现值得一试的项目。</h1>
-                    <p id="page-subtitle">开源世界很大，找到适合你的那一部分。</p>
+                    <h1 id="page-title">发现</h1>
+                    <p id="page-subtitle">从开源项目，到你的下一个灵感。</p>
                 </div>
                 <section class="search-section" aria-label="搜索项目">
                     <form id="search-form" class="search-form" role="search">
@@ -93,6 +87,11 @@
                 </section>
             </header>
 
+            <section class="library-pulse" aria-label="项目库概况">
+                <div><span>项目库</span><strong id="pulse-projects">—</strong><span>个开源项目</span></div>
+                <div><span>中文摘要</span><strong id="pulse-translations">—</strong><span>篇已就绪</span></div>
+                <button id="btn-pulse-status" type="button"><span class="status-dot"></span><span id="pulse-freshness">正在读取更新状态</span><svg class="icon"><use href="#icon-chevron"/></svg></button>
+            </section>
             <div id="refresh-progress" class="refresh-progress hidden" role="status"><div class="progress-labels"><span id="progress-stage"></span><span id="progress-detail"></span></div><div class="progress-track"><div id="progress-fill"></div></div></div>
 
             <section class="results-section" aria-label="项目">
@@ -117,8 +116,8 @@
                             </div>
                         </details>
                         <div class="view-switch" role="group" aria-label="显示方式">
-                            <button type="button" data-view="grid" aria-label="浏览视图" aria-pressed="true" title="浏览视图"><svg class="icon"><use href="#icon-grid"/></svg></button>
-                            <button type="button" data-view="list" aria-label="紧凑列表" aria-pressed="false" title="紧凑列表"><svg class="icon"><use href="#icon-list"/></svg></button>
+                            <button type="button" data-view="grid" aria-label="浏览视图" aria-pressed="true" title="浏览视图"><svg class="icon"><use href="#icon-grid"/></svg><span>浏览</span></button>
+                            <button type="button" data-view="list" aria-label="紧凑列表" aria-pressed="false" title="紧凑列表"><svg class="icon"><use href="#icon-list"/></svg><span>列表</span></button>
                         </div>
                     </div>
                 </div>
@@ -163,23 +162,26 @@
                 <button class="icon-button" type="button" data-close="reader-modal" aria-label="关闭项目阅读"><svg class="icon"><use href="#icon-close"/></svg></button>
             </div>
         </div>
+        <div class="reader-progress" aria-hidden="true"><span id="reader-progress-fill"></span></div>
         <div id="reader-scroll" class="reader-scroll" tabindex="0" aria-label="项目阅读正文">
             <article id="reader-content" class="reader-content"></article>
         </div>
         <div class="reader-footer">
+            <span id="reader-progress-label" class="reader-progress-label">阅读进度 0%</span>
             <a id="reader-github" class="button button-secondary" href="#" target="_blank" rel="noopener noreferrer">查看 GitHub<svg class="icon" aria-hidden="true"><use href="#icon-arrow"/></svg></a>
             <button id="reader-chat" class="button button-primary" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-sparkles"/></svg>向 AI 了解项目</button>
         </div>
     </dialog>
 
     <dialog id="chat-modal" class="dialog chat-dialog" aria-labelledby="chat-repo-name">
-        <div class="dialog-header"><div><span class="dialog-eyebrow">项目问答</span><h2 id="chat-repo-name"></h2></div><button class="icon-button" type="button" data-close="chat-modal" aria-label="关闭项目问答"><svg class="icon"><use href="#icon-close"/></svg></button></div>
+        <div class="dialog-header"><div><span class="dialog-context">项目问答</span><h2 id="chat-repo-name"></h2></div><button class="icon-button" type="button" data-close="chat-modal" aria-label="关闭项目问答"><svg class="icon"><use href="#icon-close"/></svg></button></div>
         <div id="chat-messages" class="chat-messages" role="log" aria-label="对话"></div>
         <form id="chat-form" class="chat-input-area"><label class="sr-only" for="chat-input">关于项目的问题</label><textarea id="chat-input" rows="2" placeholder="关于这个项目，你想了解什么？" maxlength="4000"></textarea><div class="chat-input-footer"><span>Enter 发送，Shift + Enter 换行</span><button id="btn-stop-chat" class="text-button hidden" type="button">停止回答</button><button id="btn-send-chat" class="button button-primary" type="submit" aria-label="发送问题"><svg class="icon"><use href="#icon-send"/></svg></button></div></form>
     </dialog>
 
     <div id="toast-root" class="toast-root" role="status" aria-live="polite"></div>
     <button id="btn-back-top" class="back-top icon-button" type="button" aria-label="回到顶部"><svg class="icon"><use href="#icon-up"/></svg></button>
-    <script type="module" src="/js/app.js?v=42"></script>
+    <script defer src="/vendor/gsap.min.js"></script>
+    <script type="module" src="/js/app.js?v=60"></script>
 </body>
 </html>

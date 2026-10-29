@@ -250,19 +250,15 @@ test('the restructured shell has unique IDs and every literal script target', ()
   for (const name of ['bookmark', 'sparkles', 'chevron', 'star']) assert.ok(known.has('icon-' + name));
 });
 
-test('the branch signature is a single local decoration outside the dynamic heading', () => {
+test('the shell identifies the product with an inert local branch mark', () => {
   const html = readFileSync(new URL('../static/index.html', import.meta.url), 'utf8');
-  const signatures = html.match(/<svg class="branch-signature"[\s\S]*?<\/svg>/g) || [];
+  const signatures = html.match(/<svg class="brand-mark"[\s\S]*?<\/svg>/g) || [];
   assert.equal(signatures.length, 1);
   const signature = signatures[0];
-  assert.match(signature, /width="108" height="28" viewBox="0 0 108 28"/);
-  assert.match(signature, /aria-hidden="true" focusable="false"/);
-  assert.equal([...signature.matchAll(/<circle\b/g)].length, 4);
-  for (const category of ['ai', 'tools', 'devtools', 'other']) {
-    assert.ok(signature.includes('branch-node-' + category));
-  }
+  assert.match(signature, /aria-hidden="true"/);
   assert.doesNotMatch(signature, /<script|<image|<foreignObject|<animate|<text|\b(?:href|src|tabindex|onclick)=/i);
-  assert.match(html, /class="page-introduction">\s*<svg class="branch-signature"[\s\S]*?<\/svg>\s*<h1 id="page-title">/);
+  assert.match(html, /GitHub 开源项目库/);
+  assert.match(html, /class="brand" aria-label="GitHub Trending 首页"/);
 });
 
 test('local code mounts are read-only while the existing data mount is preserved', () => {

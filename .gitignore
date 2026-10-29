@@ -9,3 +9,5 @@ data/
 tmp*/
 .superpowers/
 .workbuddy/
+.tmp/
+.taste-skill/
