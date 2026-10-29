@@ -1,1266 +1,930 @@
-import { escapeHtml, formatChatText, formatReadmeHtml, safeExternalUrl } from './sanitize.mjs';
+import { escapeHtml, formatChatText, safeExternalUrl } from './sanitize.mjs?v=42';
+import { hasDiscoverySpotlight, hydrateProjectAvatars, normalizeProjectCategory, renderProjectCardContents } from './cards.mjs?v=42';
+import { renderProjectReading } from './reader.mjs?v=42';
+import {
+    categoryNames, icon, formatStars, buildModeState, buildResultContext,
+    formatTranslationSummary, renderSparkline, timeAgo, readmeHighlights,
+    parseProjectDate, filterProjectItems, createRequestGate, streamChatText,
+} from './library.mjs?v=40';
 
-// ========== State ==========
-const state = {
-    category: 'ai',
-    language: '',
-    sort: 'score',
-    query: '',
-    page: 1,
-    pageSize: 20,
-    total: 0,
-    loading: false,
-    favoritesMode: false,
-    recommendMode: false,
-    githubSearch: false,
-    theme: typeof localStorage !== 'undefined' ? (localStorage.getItem('theme') || 'light') : 'light',
-    accent: typeof localStorage !== 'undefined' ? (localStorage.getItem('accent') || 'indigo') : 'indigo',
-    statusSignature: ''
-};
+export {
+    buildModeState, buildResultContext, emptyStateMessage, formatTranslationSummary,
+    renderProjectMeta, buildSparklinePoints, sparklineTrend, renderSparkline,
+} from './library.mjs?v=40';
 
-// ========== API Helper ==========
-async function api(path, options = {}) {
-    const resp = await fetch(`/api${path}`, {
-        headers: { 'Content-Type': 'application/json' },
-        ...options
-    });
-    if (!resp.ok) throw new Error(`API error: ${resp.status}`);
-    return resp.json();
+function preference(key, fallback, allowed) {
+    try {
+        const value = localStorage.getItem(key);
+        return allowed.includes(value) ? value : fallback;
+    } catch { return fallback; }
 }
 
-// ========== Init ==========
+function savePreference(key, value) {
+    try { localStorage.setItem(key, value); } catch { /* Storage may be disabled. */ }
+}
+
+const state = {
+    ...buildModeState('all'),
+    language: '', sort: 'score', query: '', minStars: 0, pageSize: 20,
+    total: 0, loading: false, items: [], status: null, health: null,
+    favoriteIds: new Set(), languages: [], remoteQuery: '', remoteItems: null,
+    recommendations: null, recommendationMessage: '', hadError: false,
+    view: preference('project-view', 'grid', ['grid', 'list']),
+    theme: preference('theme', 'system', ['system', 'light', 'dark']),
+    accent: preference('accent', 'indigo', ['indigo', 'teal', 'amber', 'rose']),
+};
+const requests = createRequestGate();
+const expandedProjects = new Set();
+const sparklineCache = new Map();
+const chat = { repo: '', history: [], controller: null, generation: 0 };
+const reader = { project: null, size: preference('reader-size', 'standard', ['standard', 'large']) };
+let searchTimer;
+let statusBusy = false;
+let pollingTimer;
+let emptyAction = () => {};
+const $ = id => document.getElementById(id);
+
+async function api(path, options = {}) {
+    const response = await fetch('/api' + path, {
+        ...options,
+        headers: { 'Content-Type': 'application/json', ...options.headers },
+    });
+    if (!response.ok) {
+        const error = new Error('Request failed: ' + response.status);
+        error.status = response.status;
+        throw error;
+    }
+    return response.json();
+}
+
 async function init() {
     applyTheme();
-    updateTabIndicator();
-    await checkStatus();
-    await checkHealth();
-    await loadLanguages();
-    await loadProjects();
-    setupEventListeners();
-    startStatusPolling();
+    applyView();
+    bindEvents();
+    updateModeUI();
+    $('loading-screen').classList.add('hidden');
+    $('main-content').classList.remove('hidden');
+    if (/Mac|iPhone|iPad/.test(navigator.platform)) $('search-shortcut').textContent = '⌘ K';
+    await Promise.allSettled([loadProjects(), checkStatus(), checkHealth(), loadNavigation(), loadLanguages()]);
+    pollingTimer = setInterval(() => { if (!document.hidden) checkStatus(); }, 5000);
+    window.addEventListener('pagehide', () => {
+        clearInterval(pollingTimer);
+        requests.cancel();
+        chat.controller?.abort();
+    }, { once: true });
 }
 
-async function checkStatus() {
-    try {
-        const status = await api('/status');
-        const loading = document.getElementById('loading-screen');
-        const main = document.getElementById('main-content');
-        if (status.total_projects === 0 && status.is_refreshing) {
-            loading.classList.remove('hidden');
-            main.classList.add('hidden');
-            const poll = setInterval(async () => {
-                const s = await api('/status');
-                if (s.total_projects > 0 || !s.is_refreshing) {
-                    clearInterval(poll);
-                    loading.classList.add('hidden');
-                    main.classList.remove('hidden');
-                    await loadProjects();
-                }
-            }, 3000);
-        } else {
-            loading.classList.add('hidden');
-            main.classList.remove('hidden');
-        }
-        updateStatusUI(status);
-    } catch (e) {
-        document.getElementById('loading-screen').classList.add('hidden');
-        document.getElementById('main-content').classList.remove('hidden');
-    }
+function currentCategory() {
+    return state.favoritesMode ? 'favorites' : state.recommendMode ? 'recommend' : state.category;
 }
 
-function buildStatusSignature(status) {
-    return [
-        status.is_refreshing,
-        status.refresh_stage,
-        status.translation_pending,
-        status.translation_processing,
-        status.translation_retry,
-        status.translation_failed,
-        status.translation_done
-    ].join('|');
+function updateModeUI() {
+    const category = currentCategory();
+    const title = state.githubSearch ? 'GitHub 搜索' : categoryNames[category];
+    const descriptions = {
+        all: '开源世界很大，找到适合你的那一部分。',
+        ai: '探索模型、智能体与机器学习工具。',
+        tools: '让日常工作更轻松的开源工具。',
+        devtools: '框架、命令行与开发基础设施。',
+        other: '发现更多领域的热门项目。',
+        favorites: '值得继续探索的项目，都在这里。',
+        recommend: '根据你的收藏，发现可能喜欢的项目。',
+    };
+    $('page-title').textContent = category === 'all' && !state.githubSearch ? '发现值得一试的项目。' : title;
+    $('page-subtitle').textContent = state.githubSearch ? '搜索 GitHub 上的公开项目。' : descriptions[category];
+    document.title = title + ' · GitHub Trending';
+    const discovery = !state.favoritesMode && !state.recommendMode && !state.githubSearch;
+    $('category-navigation').classList.toggle('hidden', !discovery);
+    document.querySelectorAll('.tab[data-category]').forEach(tab => {
+        const active = tab.dataset.mode === 'discover' ? discovery : !state.githubSearch && tab.dataset.category === category;
+        tab.classList.toggle('active', active);
+        if (active) tab.setAttribute('aria-current', 'page');
+        else tab.removeAttribute('aria-current');
+    });
+    document.querySelectorAll('[data-source]').forEach(button => {
+        const local = button.dataset.source === 'local';
+        button.setAttribute('aria-pressed', String(local !== state.githubSearch));
+        if (local) button.textContent = state.favoritesMode ? '收藏' : state.recommendMode ? '推荐' : '项目库';
+    });
+    $('search-input').placeholder = state.githubSearch
+        ? '搜索 GitHub，例如 topic:llm language:Python'
+        : state.favoritesMode ? '搜索收藏的项目、介绍或标签'
+        : state.recommendMode ? '搜索推荐的项目'
+        : '搜索项目、中文介绍或标签';
+    const favoriteOption = $('filter-sort').querySelector('[value="favorited"]');
+    favoriteOption.hidden = !state.favoritesMode || state.githubSearch;
+    favoriteOption.disabled = favoriteOption.hidden;
+    if (state.sort === 'favorited' && favoriteOption.hidden) state.sort = 'score';
+    const newestOption = $('filter-sort').querySelector('[value="newest"]');
+    newestOption.disabled = state.githubSearch;
+    if (state.githubSearch && state.sort === 'newest') state.sort = 'score';
+    $('filter-language').value = state.language;
+    $('filter-sort').value = state.sort;
+    $('filter-stars').value = String(state.minStars);
+    $('btn-shuffle-rec').classList.toggle('hidden', !state.recommendMode || state.githubSearch);
+    updateFilterUI();
 }
 
-function updateStatusUI(status) {
-    updateProgressBar(status);
-    updateTranslationSummary(status);
-    updateOverviewStatus(status);
-    updateRefreshFailureUI(status);
-    state.statusSignature = buildStatusSignature(status);
-    if (status.last_fetched) {
-        document.getElementById('last-updated').textContent =
-            `\u6700\u540E\u66F4\u65B0\uFF1A${timeAgo(status.last_fetched)}`;
-    }
-}
-
-function updateOverviewStatus(status) {
-    const total = document.getElementById('overview-total');
-    const freshness = document.getElementById('overview-freshness');
-    const freshnessNote = document.getElementById('overview-freshness-note');
-    const translations = document.getElementById('overview-translations');
-    if (!total || !freshness || !freshnessNote || !translations) return;
-
-    total.textContent = formatCount(status.total_projects || 0);
-    const age = Number(status.data_age_hours || 0);
-    if (status.is_data_stale) {
-        freshness.textContent = '需刷新';
-        freshnessNote.textContent = age > 0 ? `缓存约 ${formatAgeHours(age)}` : '缓存过期';
-    } else if (status.last_fetched) {
-        freshness.textContent = '新鲜';
-        freshnessNote.textContent = age > 0 ? `更新于 ${formatAgeHours(age)} 前` : '刚刚更新';
-    } else {
-        freshness.textContent = '待初始化';
-        freshnessNote.textContent = '暂无抓取记录';
-    }
-
-    translations.textContent = `${formatCount(status.translation_pending || 0)} / ${formatCount(status.translation_done || 0)}`;
-}
-
-function updateRefreshFailureUI(status) {
-    if (!status || !status.last_refresh_error) return;
-    updateHealthUI({
-        status: 'warning',
-        problems: [`最近刷新失败：${status.last_refresh_error}`]
+function updateFilterUI() {
+    $('btn-clear-search').classList.toggle('hidden', !$('search-input').value);
+    $('search-shortcut').classList.toggle('hidden', Boolean($('search-input').value));
+    const filters = [];
+    if (state.query) filters.push(['query', '搜索：' + state.query]);
+    if (state.language) filters.push(['language', state.language]);
+    if (state.minStars) filters.push(['minStars', formatStars(state.minStars) + '+ Star']);
+    $('btn-clear-filters').classList.toggle('hidden', !filters.length);
+    const filterCount = Number(Boolean(state.language)) + Number(Boolean(state.minStars));
+    $('filter-count').textContent = String(filterCount);
+    $('filter-count').classList.toggle('hidden', !filterCount);
+    const chips = $('active-filters');
+    chips.replaceChildren();
+    chips.classList.toggle('hidden', !filters.length);
+    filters.forEach(([key, label]) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'filter-chip';
+        button.dataset.filter = key;
+        button.setAttribute('aria-label', '移除筛选 ' + label);
+        button.innerHTML = '<span>' + escapeHtml(label) + '</span>' + icon('close');
+        chips.append(button);
     });
 }
 
-function updateTranslationSummary(status) {
-    const detail = document.getElementById('translation-summary-detail');
-    detail.textContent = formatTranslationSummary(status);
+function updateResultUI() {
+    const context = buildResultContext(state);
+    $('result-context-label').textContent = context.label;
+    $('result-context-title').textContent = state.githubSearch
+        ? (state.query ? '“' + state.query + '”' : '搜索 GitHub')
+        : state.favoritesMode ? '收藏的项目'
+        : state.recommendMode ? '为你精选'
+        : state.query || state.language || state.minStars ? '筛选结果' : '全部项目';
+    $('result-context-detail').textContent = state.loading ? '正在加载…'
+        : state.githubSearch && !state.query ? '输入关键词后搜索'
+        : state.total.toLocaleString('zh-CN') + (state.githubSearch ? ' 个结果' : ' 个项目');
+    $('result-context').dataset.tone = context.tone;
+    updateFilterUI();
 }
 
-function formatHealthProblem(problem) {
-    if (String(problem).startsWith('Last refresh failed: ')) {
-        return `最近刷新失败：${String(problem).replace('Last refresh failed: ', '')}`;
-    }
-    const labels = {
-        'API_KEY is not configured': '未配置模型 API_KEY，翻译、推荐和项目问答不可用',
-        'GITHUB_TOKEN is not configured; GitHub API rate limits will be lower': '未配置 GitHub Token，抓取时更容易触发限流',
-        'Proxy is not configured': '未配置代理，GitHub 或模型接口可能无法访问',
-        'Database check failed': '数据库检查失败',
-        'Project data is stale': '项目数据已过期，建议刷新或检查 GitHub Token/代理'
-    };
-    return labels[problem] || problem;
+function setLoading(loading) {
+    state.loading = loading;
+    $('project-list').setAttribute('aria-busy', String(loading));
+    $('btn-load-more').disabled = loading;
+    $('btn-load-more').textContent = loading ? '正在加载…' : '加载更多';
+    $('btn-shuffle-rec').disabled = loading;
+    updateResultUI();
 }
 
-function updateHealthUI(health) {
-    const box = document.getElementById('health-summary');
-    const detail = document.getElementById('health-summary-detail');
-    if (!box || !detail) return;
-
-    const problems = Array.isArray(health.problems) ? health.problems : [];
-    if (health.status === 'ok' || problems.length === 0) {
-        box.classList.add('hidden');
-        detail.textContent = '';
-        updateOverviewHealth('正常', '配置可用');
-        return;
-    }
-
-    box.classList.remove('hidden');
-    detail.textContent = problems.slice(0, 3).map(formatHealthProblem).join('  |  ');
-    updateOverviewHealth('需关注', `${problems.length} 项提示`);
+function renderSkeletons() {
+    $('project-list').innerHTML = Array.from({ length: 4 }, () =>
+        '<div class="project-card skeleton-card" aria-hidden="true">' +
+        '<div class="skeleton-line"></div>'.repeat(6) + '</div>').join('');
 }
 
-async function checkHealth() {
-    try {
-        const health = await api('/health');
-        updateHealthUI(health);
-    } catch (e) {
-        updateHealthUI({
-            status: 'warning',
-            problems: ['无法读取系统诊断状态']
-        });
-    }
-}
-
-function updateOverviewHealth(label, note) {
-    const health = document.getElementById('overview-health');
-    const healthNote = document.getElementById('overview-health-note');
-    if (!health || !healthNote) return;
-    health.textContent = label;
-    healthNote.textContent = note;
-}
-
-function translationStatusLabel(status) {
-    const labels = {
-        pending: '待翻译',
-        processing: '翻译中',
-        retry: '待重试',
-        failed: '翻译失败',
-        done: '已翻译'
-    };
-    return labels[status] || '未翻译';
-}
-
-function renderTranslationBadge(status) {
-    if (!status) return '';
-    const safeStatus = ['pending', 'processing', 'retry', 'failed', 'done'].includes(status)
-        ? status
-        : 'unknown';
-    return `<span class="translation-badge ${safeStatus}">${escapeHtml(translationStatusLabel(status))}</span>`;
-}
-
-function buildProjectImportPayload(project) {
-    return {
-        repo_full_name: project.repo_full_name || '',
-        description: project.description || '',
-        stars: Number(project.stars || 0),
-        stars_gained: Number(project.stars_gained || 0),
-        language: project.language || '',
-        topics: Array.isArray(project.topics) ? project.topics : [],
-        repo_url: project.repo_url || '',
-        last_updated: project.last_updated || '',
-        category: project.category || 'other'
-    };
-}
-
-function startStatusPolling() {
-    setInterval(async () => {
-        try {
-            const status = await api('/status');
-            const nextSignature = buildStatusSignature(status);
-            const changed = state.statusSignature && state.statusSignature !== nextSignature;
-            updateStatusUI(status);
-
-            if (changed && !state.loading && !state.recommendMode && !state.githubSearch && state.page === 1) {
-                await loadProjects();
-            }
-        } catch (e) {
-            // ignore polling errors
-        }
-    }, 5000);
-}
-
-// ========== Load Languages Dropdown ==========
-async function loadLanguages() {
-    try {
-        const langs = await api('/languages');
-        const sel = document.getElementById('filter-language');
-        // Keep first option, remove rest
-        while (sel.options.length > 1) sel.remove(1);
-        langs.forEach(lang => {
-            const opt = document.createElement('option');
-            opt.value = lang;
-            opt.textContent = lang;
-            sel.appendChild(opt);
-        });
-    } catch (e) { /* ignore */ }
-}
-
-// ========== Load Projects ==========
-function renderSkeletons(list, count = 4) {
-    for (let i = 0; i < count; i++) {
-        const card = document.createElement('div');
-        card.className = 'project-card skeleton-card';
-        card.innerHTML =
-            '<div class="sk-line sk-line-title"></div>' +
-            '<div class="sk-line sk-line-desc"></div>' +
-            '<div class="sk-line sk-line-desc-short"></div>' +
-            '<div class="sk-line sk-line-meta"></div>';
-        list.appendChild(card);
-    }
-}
-
-async function loadProjects(append = false) {
-    if (state.loading) return;
-    state.loading = true;
-
-    const listEl = document.getElementById('project-list');
-    // Only on a cold list, so filtering or searching never flashes placeholders.
-    if (!append && listEl.children.length === 0) renderSkeletons(listEl);
-
+async function loadProjects(append = false, { force = false } = {}) {
+    if (append && (state.loading || state.recommendMode || state.githubSearch || state.items.length >= state.total)) return;
+    const request = requests.start();
+    const snapshot = { ...state };
+    const page = append ? state.page + 1 : 1;
+    setLoading(true);
+    state.hadError = false;
+    $('empty-state').classList.add('hidden');
+    if (!append && !state.items.length) renderSkeletons();
     try {
         let data;
-        if (state.favoritesMode) {
-            const params = new URLSearchParams({
-                sort: state.sort,
-                page: state.page,
-                page_size: state.pageSize
-            });
-            data = await api(`/favorites?${params}`);
-        } else {
-            const params = new URLSearchParams({
-                category: state.category,
-                sort: state.sort,
-                page: state.page,
-                page_size: state.pageSize
-            });
-            if (state.language) params.set('language', state.language);
-            if (state.query) params.set('q', state.query);
-            data = await api(`/projects?${params}`);
-        }
-
-        state.total = data.total;
-        const list = document.getElementById('project-list');
-        const empty = document.getElementById('empty-state');
-        const scrollHint = document.getElementById('load-more');
-        updateResultContext();
-
-        if (!append) list.innerHTML = '';
-
-        if (data.items.length === 0 && !append) {
-            empty.classList.remove('hidden');
-            empty.querySelector('p').textContent = emptyStateMessage(state);
-            scrollHint.classList.add('hidden');
-        } else {
-            empty.classList.add('hidden');
-            const startIndex = list.children.length;
-            const newCards = [];
-            data.items.forEach((p, i) => {
-                const card = renderCard(p);
-                card.style.animationDelay = `${(startIndex + i) * 0.04}s`;
-                list.appendChild(card);
-                newCards.push(card);
-            });
-            hydrateSparklines(newCards);
-            const shown = list.children.length;
-            if (shown < state.total) {
-                scrollHint.classList.remove('hidden');
+        if (snapshot.githubSearch) {
+            if (!snapshot.query) {
+                data = { items: [], total: 0, message: 'search_prompt' };
             } else {
-                scrollHint.classList.add('hidden');
+                let items = state.remoteItems;
+                if (force || !items || state.remoteQuery !== snapshot.query) {
+                    const response = await api('/search/github?' + new URLSearchParams({ q: snapshot.query }), { signal: request.signal });
+                    if (!request.isCurrent()) return;
+                    state.remoteItems = items = response.items || [];
+                    state.remoteQuery = snapshot.query;
+                    updateLanguageOptions();
+                }
+                const filtered = filterProjectItems(items, { ...snapshot, query: '' });
+                data = { items: filtered, total: filtered.length };
             }
+        } else if (snapshot.recommendMode) {
+            let items = state.recommendations;
+            if (force || !items) {
+                if (!state.items.length) $('project-list').innerHTML = '<div class="list-message"><span class="spinner"></span><span>正在根据你的收藏生成推荐</span></div>';
+                const response = await api('/recommendations' + (force ? '?force=true' : ''), { signal: request.signal });
+                if (!request.isCurrent()) return;
+                state.recommendations = items = response.items || [];
+                state.recommendationMessage = response.message || '';
+            }
+            const filtered = filterProjectItems(items, snapshot);
+            data = { items: filtered, total: filtered.length, message: state.recommendationMessage };
+        } else {
+            const params = new URLSearchParams({ sort: snapshot.sort, page, page_size: snapshot.pageSize });
+            if (!snapshot.favoritesMode && snapshot.category !== 'all') params.set('category', snapshot.category);
+            if (snapshot.language) params.set('language', snapshot.language);
+            if (snapshot.query) params.set('q', snapshot.query);
+            if (snapshot.minStars) params.set('min_stars', snapshot.minStars);
+            data = await api((snapshot.favoritesMode ? '/favorites?' : '/projects?') + params, { signal: request.signal });
         }
-    } catch (e) {
-        console.error('Failed to load projects:', e);
+        if (!request.isCurrent()) return;
+        state.page = page;
+        state.total = Number(data.total || 0);
+        state.items = append ? [...state.items, ...data.items] : data.items;
+        renderCards(data.items, append);
+        if (!state.items.length) showEmpty(data.message);
+    } catch (error) {
+        if (!request.isCurrent() || error.name === 'AbortError') return;
+        state.hadError = true;
+        if (append) {
+            showToast('加载更多失败，请重试。', 'error');
+        } else {
+            state.items = [];
+            state.total = 0;
+            $('project-list').replaceChildren();
+            showEmpty('error');
+        }
+    } finally {
+        if (request.isCurrent()) {
+            setLoading(false);
+            updatePagination();
+        }
     }
-    state.loading = false;
 }
 
-// ========== Render Card ==========
-function renderCard(p) {
-    const card = document.createElement('div');
+function renderCards(items, append = false) {
+    const list = $('project-list');
+    if (!append) list.replaceChildren();
+    const spotlight = !append && hasDiscoverySpotlight(state);
+    const cards = items.map((project, index) => renderCard(project, spotlight && index === 0));
+    list.append(...cards);
+    hydrateSparklines(cards);
+}
+
+function renderCard(project, featured = false) {
+    const card = document.createElement('article');
     card.className = 'project-card';
-    card.dataset.id = p.id;
-
-    const repoName = escapeHtml(p.repo_full_name || '');
-    const repoUrl = escapeHtml(safeExternalUrl(p.repo_url || ''));
-    const metaHtml = renderProjectMeta(p);
-    const newBadge = p.is_new ? '<span class="badge-new">NEW</span>' : '';
-    const favClass = p.is_favorited ? 'favorited' : '';
-    const desc = escapeHtml(p.description_zh || p.description || '\u6682\u65E0\u63CF\u8FF0');
-    const readmeSummary = formatReadme(p.readme_summary_zh || '');
-    const tags = (p.topics || []).slice(0, 5);
-    const tagsHtml = tags.map(t =>
-        `<span class="tag" data-topic="${escapeHtml(t)}">#${escapeHtml(t)}</span>`
-    ).join('');
-
-    card.innerHTML = `
-        <div class="card-header">
-            <div class="card-repo">
-                <a href="${repoUrl}" target="_blank" rel="noopener">${repoName}</a>
-                ${newBadge}
-            </div>
-            <div class="card-actions">
-                <button class="btn-chat" data-repo="${repoName}" title="AI \u95EE\u7B54">
-                    <svg viewBox="0 0 24 24" width="14" height="14">
-                        <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z" fill="currentColor"/>
-                    </svg>
-                    <span>AI</span>
-                </button>
-                <button class="btn-favorite ${favClass}" data-id="${p.id}" title="\u6536\u85CF">
-                    <svg viewBox="0 0 24 24" width="18" height="18">
-                        <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="currentColor"/>
-                    </svg>
-                </button>
-                ${metaHtml}
-            </div>
-        </div>
-        <div class="card-description">${desc}</div>
-        ${readmeSummary ? `
-            <button class="readme-toggle" type="button">
-                <span class="readme-toggle-label">README \u6458\u8981</span><span class="readme-toggle-icon">\u25BC</span>
-            </button>
-            <div class="readme-content">
-                <div class="readme-text">${readmeSummary}</div>
-            </div>
-        ` : ''}
-        <div class="card-footer">
-            <div class="card-tags">${tagsHtml}</div>
-            <span class="card-time">${p.last_updated ? timeAgo(p.last_updated) : ''}</span>
-        </div>
-    `;
-
-    // Chat button
-    card.querySelector('.btn-chat').addEventListener('click', (e) => {
-        e.stopPropagation();
-        openChat(p.repo_full_name);
+    card.classList.toggle('is-featured', featured);
+    card.classList.toggle('has-highlights', featured && readmeHighlights(project.readme_summary_zh).length > 0);
+    card.dataset.repo = project.repo_full_name;
+    card.dataset.id = String(project.id || 0);
+    card.dataset.category = normalizeProjectCategory(project.category);
+    card.setAttribute('aria-labelledby', 'project-title-' + encodeURIComponent(project.repo_full_name || ''));
+    card.innerHTML = renderProjectCardContents(project, {
+        featured, expanded: expandedProjects.has(project.repo_full_name),
     });
-
-    // Favorite toggle
-    card.querySelector('.btn-favorite').addEventListener('click', (e) => {
-        e.stopPropagation();
-        toggleFavorite(p, card.querySelector('.btn-favorite'), card);
-    });
-
-    // Tag click
-    card.querySelectorAll('.tag').forEach(tag => {
-        tag.addEventListener('click', () => {
-            const topic = tag.dataset.topic;
-            document.getElementById('search-input').value = topic;
-            state.query = topic;
-            state.page = 1;
-            if (state.favoritesMode) switchToCategory('ai');
-            else loadProjects();
-        });
-    });
-
-    const readmeToggle = card.querySelector('.readme-toggle');
-    if (readmeToggle) {
-        readmeToggle.addEventListener('click', () => toggleReadme(readmeToggle));
-    }
-
+    hydrateProjectAvatars(card);
     return card;
 }
 
-// ========== Favorites ==========
-async function toggleFavorite(project, btn, card) {
-    let projectId = Number(project.id || 0);
-    const isFav = btn.classList.contains('favorited');
+async function hydrateSparklines(cards) {
+    const slots = cards.flatMap(card => [...card.querySelectorAll('.star-trend')]);
+    const missing = [...new Set(slots.map(slot => slot.dataset.projectId).filter(id => !sparklineCache.has(id)))];
     try {
-        if (!projectId) {
-            const imported = await api('/projects/import', {
-                method: 'POST',
-                body: JSON.stringify(buildProjectImportPayload(project))
-            });
-            projectId = imported.id;
-            project.id = imported.id;
-            project.is_favorited = imported.is_favorited;
-            card.dataset.id = String(imported.id);
-            btn.dataset.id = String(imported.id);
+        if (missing.length) {
+            const history = await api('/star-history?ids=' + missing.join(',') + '&points=30');
+            missing.forEach(id => sparklineCache.set(id, history[id] || []));
         }
-
-        if (isFav) {
-            await api(`/favorites/${projectId}`, { method: 'DELETE' });
-            btn.classList.remove('favorited');
-            project.is_favorited = false;
-            showToast('已取消收藏', 'info');
-            // If in favorites view, remove the card with animation
-            if (state.favoritesMode) {
-                card.style.transition = 'opacity 0.3s, transform 0.3s';
-                card.style.opacity = '0';
-                card.style.transform = 'translateX(30px)';
-                setTimeout(() => {
-                    card.remove();
-                    state.total--;
-                    if (state.total === 0) {
-                        document.getElementById('empty-state').classList.remove('hidden');
-                    }
-                }, 300);
-            }
-        } else {
-            await api(`/favorites/${projectId}`, { method: 'POST' });
-            btn.classList.add('favorited');
-            project.is_favorited = true;
-            showToast('已加入收藏', 'success');
-            // Heart pop animation
-            btn.classList.add('pop');
-            setTimeout(() => btn.classList.remove('pop'), 400);
-        }
-    } catch (e) { /* ignore */ }
+        slots.forEach(slot => {
+            if (!slot.isConnected) return;
+            const svg = renderSparkline(sparklineCache.get(slot.dataset.projectId) || []);
+            if (svg) slot.innerHTML = svg;
+            else slot.remove();
+        });
+    } catch { slots.forEach(slot => slot.remove()); }
 }
 
-function switchToCategory(cat) {
-    state.favoritesMode = false;
-    state.recommendMode = false;
-    state.category = cat;
-    state.page = 1;
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelector(`.tab[data-category="${cat}"]`).classList.add('active');
-    updateTabIndicator();
+function updatePagination() {
+    const paginated = !state.recommendMode && !state.githubSearch;
+    const more = paginated && state.items.length < state.total;
+    $('load-more').classList.toggle('hidden', !more);
+    $('load-more-note').textContent = '已显示 ' + state.items.length + ' / ' + state.total + ' 个项目';
+}
+
+function showEmpty(reason = '') {
+    const filtered = Boolean(state.query || state.language || state.minStars);
+    let title = '没有找到项目', detail = '试试其他关键词，或调整筛选条件。', action = '清除筛选';
+    emptyAction = clearFilters;
+    if (reason === 'error') {
+        title = state.githubSearch ? 'GitHub 搜索暂时不可用' : '暂时无法加载项目';
+        detail = '请检查服务连接后重试。已保存的项目和收藏不会受影响。';
+        action = '重新加载';
+        emptyAction = () => loadProjects(false, { force: true });
+    } else if (reason === 'search_prompt') {
+        title = '探索整个 GitHub';
+        detail = '输入项目名或关键词，也可以使用 topic:llm 等搜索条件。';
+        action = '输入关键词';
+        emptyAction = () => $('search-input').focus();
+    } else if (state.recommendMode && !state.githubSearch && reason === 'no_favorites') {
+        title = '从一个收藏开始';
+        detail = '收藏感兴趣的项目，我们会根据标签和语言为你推荐。';
+        action = '发现项目';
+        emptyAction = () => selectCategory('all');
+    } else if (state.favoritesMode && !state.githubSearch && !filtered) {
+        title = '留住你的下一个灵感';
+        detail = '点击项目右上角的收藏图标，即可在这里继续探索。';
+        action = '发现项目';
+        emptyAction = () => selectCategory('all');
+    } else if (state.recommendMode && !filtered) {
+        title = '还没有合适的推荐';
+        detail = '试着收藏更多感兴趣的项目，让推荐更了解你。';
+        action = '发现项目';
+        emptyAction = () => selectCategory('all');
+    } else if (!filtered && !state.githubSearch) {
+        title = state.status?.is_refreshing ? '正在收录项目' : '项目库还没有内容';
+        detail = state.status?.is_refreshing ? '项目抓取完成后会自动出现在这里。' : '更新项目库，开始发现热门开源项目。';
+        action = '更新项目';
+        emptyAction = refreshProjects;
+    }
+    $('empty-title').textContent = title;
+    $('empty-detail').textContent = detail;
+    $('empty-action').textContent = action;
+    $('empty-state').classList.remove('hidden');
+}
+
+function cancelSearch() {
+    clearTimeout(searchTimer);
+    requests.cancel();
+    setLoading(false);
+}
+
+function selectCategory(category) {
+    cancelSearch();
+    const fromRemote = state.githubSearch;
+    Object.assign(state, buildModeState(category));
+    if (fromRemote || state.recommendMode) {
+        state.query = ''; state.language = ''; state.minStars = 0;
+        $('search-input').value = '';
+    }
+    state.items = [];
+    state.total = 0;
+    updateModeUI();
+    closeNavigation();
+    loadProjects();
+    window.scrollTo({ top: 0, behavior: 'instant' });
+}
+
+function selectSource(source) {
+    cancelSearch();
+    state.githubSearch = source === 'github';
+    state.query = $('search-input').value.trim();
+    state.items = [];
+    state.total = 0;
+    updateModeUI();
     loadProjects();
 }
 
-// ========== Tab Indicator ==========
-const TAB_TINTS = {
-    favorites: 'var(--danger-soft)',
-    recommend: 'var(--star-bg)'
-};
-
-function updateTabIndicator() {
-    const indicator = document.getElementById('tab-indicator');
-    const active = document.querySelector('.tab.active');
-    if (!indicator || !active) return;
-    indicator.style.width = `${active.offsetWidth}px`;
-    indicator.style.transform = `translateX(${active.offsetLeft}px)`;
-    indicator.style.setProperty('--indicator-bg', TAB_TINTS[active.dataset.category] || 'var(--bg-card)');
-    indicator.classList.add('ready');
+function clearFilters() {
+    cancelSearch();
+    state.query = ''; state.language = ''; state.minStars = 0;
+    $('search-input').value = '';
+    updateModeUI();
+    loadProjects();
 }
 
-// ========== Recommendations ==========
-async function loadRecommendations(force = false) {
-    const list = document.getElementById('project-list');
-    const empty = document.getElementById('empty-state');
-    const loadMore = document.getElementById('load-more');
-    loadMore.classList.add('hidden');
-    list.innerHTML = '<div class="rec-loading">AI \u6B63\u5728\u5206\u6790\u4F60\u7684\u6536\u85CF\u504F\u597D\uFF0C\u751F\u6210\u63A8\u8350...</div>';
-    empty.classList.add('hidden');
-    state.total = 0;
-    updateResultContext();
-
+async function toggleFavorite(project, button) {
+    if (button.disabled) return;
+    button.disabled = true;
     try {
-        const url = force ? '/recommendations?force=true' : '/recommendations';
-        const data = await api(url);
-        list.innerHTML = '';
-        state.total = Array.isArray(data.items) ? data.items.length : 0;
-        updateResultContext();
-
-        if (data.message === 'no_favorites') {
-            empty.classList.remove('hidden');
-            empty.querySelector('p').textContent = emptyStateMessage({ recommendMode: true, reason: 'no_favorites' });
-            return;
-        }
-        if (data.items.length === 0) {
-            empty.classList.remove('hidden');
-            empty.querySelector('p').textContent = emptyStateMessage({ recommendMode: true });
-            return;
-        }
-
-        // Add "换一批" button at top
-        const toolbar = document.createElement('div');
-        toolbar.className = 'rec-toolbar';
-        toolbar.innerHTML = `<button class="btn btn-shuffle" id="btn-shuffle-rec">
-            <svg viewBox="0 0 24 24" width="16" height="16"><path d="M17.65 6.35A7.96 7.96 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" fill="currentColor"/></svg>
-            \u6362\u4E00\u6279
-        </button>`;
-        list.appendChild(toolbar);
-
-        toolbar.querySelector('#btn-shuffle-rec').addEventListener('click', () => {
-            loadRecommendations(true);
-        });
-
-        const recCards = [];
-        data.items.forEach((p, i) => {
-            const card = renderCard(p);
-            if (p.recommendation_reason) {
-                const badge = document.createElement('div');
-                badge.className = 'rec-reason';
-                badge.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align:-2px;margin-right:4px;flex-shrink:0"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" fill="currentColor"/></svg>';
-                badge.append(document.createTextNode(p.recommendation_reason));
-                const desc = card.querySelector('.card-description');
-                if (desc) desc.after(badge);
-            }
-            card.style.animationDelay = `${i * 0.04}s`;
-            list.appendChild(card);
-            recCards.push(card);
-        });
-        hydrateSparklines(recCards);
-    } catch (e) {
-        list.innerHTML = '';
-        empty.classList.remove('hidden');
-        empty.querySelector('p').textContent = emptyStateMessage({ recommendMode: true, reason: 'error' });
-        updateResultContext();
-    }
-}
-
-// ========== Format README ==========
-function formatReadme(text) {
-    return formatReadmeHtml(text);
-}
-
-// ========== Utilities ==========
-function formatStars(n) {
-    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
-    return String(n);
-}
-
-export function buildModeState(category) {
-    if (category === 'favorites') {
-        return {
-            category: 'ai',
-            favoritesMode: true,
-            recommendMode: false,
-            githubSearch: false,
-            page: 1,
-        };
-    }
-    if (category === 'recommend') {
-        return {
-            category: 'ai',
-            favoritesMode: false,
-            recommendMode: true,
-            githubSearch: false,
-            page: 1,
-        };
-    }
-    return {
-        category,
-        favoritesMode: false,
-        recommendMode: false,
-        githubSearch: false,
-        page: 1,
-    };
-}
-
-export function emptyStateMessage({ favoritesMode = false, recommendMode = false, githubSearch = false, reason = '' } = {}) {
-    if (favoritesMode) return '还没有收藏的项目';
-    if (recommendMode && reason === 'no_favorites') return '收藏一些项目后，AI 会为你推荐相似项目';
-    if (recommendMode && reason === 'error') return '加载推荐失败，请重试';
-    if (recommendMode) return '暂无推荐，试试多收藏一些项目';
-    if (githubSearch && reason === 'error') return 'GitHub 搜索失败，请检查网络或稍后重试';
-    if (githubSearch) return 'GitHub 没有返回匹配项目';
-    return '暂无项目数据';
-}
-
-export function buildResultContext({
-    category = 'ai',
-    language = '',
-    query = '',
-    total = 0,
-    favoritesMode = false,
-    recommendMode = false,
-    githubSearch = false,
-} = {}) {
-    const countText = `共 ${formatCount(total)} 个项目`;
-    if (githubSearch) {
-        return {
-            label: 'GitHub 搜索',
-            title: query || '实时搜索',
-            detail: `来自 GitHub 实时搜索 · ${formatCount(total)} 个结果`,
-            tone: 'remote',
-        };
-    }
-    if (favoritesMode) {
-        return {
-            label: '收藏',
-            title: '已收藏项目',
-            detail: countText,
-            tone: 'favorites',
-        };
-    }
-    if (recommendMode) {
-        return {
-            label: '为你推荐',
-            title: 'AI 推荐列表',
-            detail: total > 0 ? countText : '等待收藏偏好',
-            tone: 'recommend',
-        };
-    }
-
-    const categoryLabels = {
-        ai: 'AI',
-        tools: '实用工具',
-        devtools: '开发工具',
-        other: '其他热门',
-    };
-    const parts = [categoryLabels[category] || category || '全部'];
-    if (language) parts.push(language);
-    if (query) parts.push(query);
-    return {
-        label: '本地筛选',
-        title: parts.join(' · '),
-        detail: countText,
-        tone: 'local',
-    };
-}
-
-function updateResultContext(overrides = {}) {
-    const box = document.getElementById('result-context');
-    const label = document.getElementById('result-context-label');
-    const title = document.getElementById('result-context-title');
-    const detail = document.getElementById('result-context-detail');
-    if (!box || !label || !title || !detail) return;
-
-    const context = buildResultContext({ ...state, ...overrides });
-    box.className = `result-context result-context-${context.tone}`;
-    label.textContent = context.label;
-    title.textContent = context.title;
-    detail.textContent = context.detail;
-}
-
-export function formatTranslationSummary(status) {
-    return [
-        `待翻译 ${status.translation_pending || 0}`,
-        `翻译中 ${status.translation_processing || 0}`,
-        `待重试 ${status.translation_retry || 0}`,
-        `失败 ${status.translation_failed || 0}`,
-        `已完成 ${status.translation_done || 0}`,
-    ].join('  |  ');
-}
-
-export function renderProjectMeta(project) {
-    const gainedHtml = project.stars_gained > 0
-        ? `<span class="star-gained">+${formatStars(project.stars_gained)}</span>` : '';
-    const langHtml = project.language
-        ? `<span class="card-language">${escapeHtml(project.language)}</span>` : '';
-    const sparkSlot = project.id
-        ? `<span class="star-trend" data-project-id="${Number(project.id)}" aria-hidden="true"></span>` : '';
-    return `
-        <div class="card-stats">
-            <span class="star-count">⭐ ${formatStars(project.stars)}</span>
-            ${sparkSlot}
-            ${gainedHtml}
-            ${langHtml}
-            ${renderTranslationBadge(project.translation_status)}
-        </div>
-    `;
-}
-
-// ========== Star Trend Sparklines ==========
-const SPARK_WIDTH = 72;
-const SPARK_HEIGHT = 22;
-const SPARK_PAD = 2;
-
-function sparklineValues(history) {
-    return (history || [])
-        .filter((h) => h && typeof h === 'object' && h.stars !== null && h.stars !== undefined && h.stars !== '')
-        .map((h) => Number(h.stars))
-        .filter((v) => Number.isFinite(v));
-}
-
-export function buildSparklinePoints(history, width = SPARK_WIDTH, height = SPARK_HEIGHT, pad = SPARK_PAD) {
-    const values = sparklineValues(history);
-    if (values.length < 2) return [];
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const span = max - min || 1;
-    const stepX = (width - pad * 2) / (values.length - 1);
-    return values.map((v, i) => {
-        const x = pad + i * stepX;
-        const y = height - pad - ((v - min) / span) * (height - pad * 2);
-        return [Number(x.toFixed(1)), Number(y.toFixed(1))];
-    });
-}
-
-export function sparklineTrend(history) {
-    const values = sparklineValues(history);
-    if (values.length < 2) return 'flat';
-    const first = values[0];
-    const last = values[values.length - 1];
-    const delta = last - first;
-    if (delta === 0) return 'flat';
-    return delta > 0 ? 'up' : 'down';
-}
-
-export function renderSparkline(history) {
-    const points = buildSparklinePoints(history);
-    if (!points.length) return '';
-    const values = sparklineValues(history);
-    const trend = sparklineTrend(history);
-    const path = points.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x} ${y}`).join(' ');
-    const [lastX, lastY] = points[points.length - 1];
-    const delta = values[values.length - 1] - values[0];
-    const deltaText = delta === 0 ? '0' : `${delta > 0 ? '+' : '-'}${formatStars(Math.abs(delta))}`;
-    const title = `最近 ${values.length} 次记录：${deltaText} star`;
-    return `<svg class="sparkline sparkline-${trend}" viewBox="0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}" width="${SPARK_WIDTH}" height="${SPARK_HEIGHT}" role="img">`
-        + `<title>${escapeHtml(title)}</title>`
-        + `<path d="${path}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>`
-        + `<circle cx="${lastX}" cy="${lastY}" r="1.8" fill="currentColor"/>`
-        + `</svg>`;
-}
-
-async function hydrateSparklines(cards) {
-    const slots = [];
-    cards.forEach((card) => {
-        const slot = card.querySelector('.star-trend[data-project-id]');
-        if (slot && !slot.dataset.loaded) slots.push(slot);
-    });
-    if (!slots.length) return;
-    const ids = [...new Set(slots.map((s) => s.dataset.projectId))].filter((id) => Number(id) > 0);
-    if (!ids.length) return;
-    try {
-        const history = await api(`/star-history?ids=${ids.join(',')}&points=30`);
-        slots.forEach((slot) => {
-            slot.dataset.loaded = '1';
-            const series = history[slot.dataset.projectId];
-            const svg = renderSparkline(series || []);
-            if (svg) {
-                slot.innerHTML = svg;
-                slot.classList.add('has-data');
-            } else {
-                slot.remove();
-            }
-        });
-    } catch (e) {
-        slots.forEach((slot) => slot.remove());
-    }
-}
-
-function formatCount(n) {
-    const value = Number(n || 0);
-    if (value >= 1000) return (value / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
-    return String(value);
-}
-
-function formatAgeHours(hours) {
-    const value = Number(hours || 0);
-    if (value < 1) return '不足 1 小时';
-    if (value < 24) return `${Math.round(value)} 小时`;
-    return `${Math.round(value / 24)} 天`;
-}
-
-function timeAgo(dateStr) {
-    if (!dateStr) return '';
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diff = Math.floor((now - date) / 1000);
-    if (diff < 60) return '\u521A\u521A';
-    if (diff < 3600) return Math.floor(diff / 60) + ' \u5206\u949F\u524D';
-    if (diff < 86400) return Math.floor(diff / 3600) + ' \u5C0F\u65F6\u524D';
-    if (diff < 2592000) return Math.floor(diff / 86400) + ' \u5929\u524D';
-    if (diff < 31536000) return Math.floor(diff / 2592000) + ' \u4E2A\u6708\u524D';
-    return Math.floor(diff / 31536000) + ' \u5E74\u524D';
-}
-
-// ========== Event Listeners ==========
-function setupEventListeners() {
-    // Category tabs
-    document.querySelectorAll('.tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            const cat = tab.dataset.category;
-            const nextMode = buildModeState(cat);
-            Object.assign(state, nextMode);
-            updateTabIndicator();
-            if (state.recommendMode) loadRecommendations();
-            else loadProjects();
-        });
-    });
-    window.addEventListener('resize', updateTabIndicator);
-
-    // Language filter
-    document.getElementById('filter-language').addEventListener('change', (e) => {
-        state.language = e.target.value;
-        state.page = 1;
-        loadProjects();
-    });
-
-    // Sort filter
-    document.getElementById('filter-sort').addEventListener('change', (e) => {
-        state.sort = e.target.value;
-        state.page = 1;
-        loadProjects();
-    });
-
-    // Search with debounce
-    let searchTimer;
-    const searchInput = document.getElementById('search-input');
-    const btnSearchGithub = document.getElementById('btn-search-github');
-
-    searchInput.addEventListener('input', (e) => {
-        clearTimeout(searchTimer);
-        searchTimer = setTimeout(() => {
-            state.query = e.target.value.trim();
-            state.page = 1;
-            state.githubSearch = false;
-            if (state.favoritesMode) switchToCategory('ai');
-            else loadProjects();
-        }, 300);
-    });
-
-    // Search GitHub button
-    btnSearchGithub.addEventListener('click', async () => {
-        const q = searchInput.value.trim();
-        if (!q) return;
-        btnSearchGithub.disabled = true;
-        btnSearchGithub.textContent = '搜索中...';
-        try {
-            const data = await api(`/search/github?q=${encodeURIComponent(q)}`);
-            state.githubSearch = true;
-            state.query = q;
-            state.total = data.total;
-            const list = document.getElementById('project-list');
-            const empty = document.getElementById('empty-state');
-            const loadMore = document.getElementById('load-more');
-            list.innerHTML = '';
-            data.items.forEach((p, i) => {
-                const card = renderCard(p);
-                card.style.animationDelay = `${i * 0.04}s`;
-                list.appendChild(card);
+        let id = Number(project.id || 0);
+        if (!id) {
+            const imported = await api('/projects/import', {
+                method: 'POST',
+                body: JSON.stringify({
+                    repo_full_name: project.repo_full_name, description: project.description || '',
+                    stars: Number(project.stars || 0), stars_gained: Number(project.stars_gained || 0),
+                    language: project.language || '', topics: project.topics || [],
+                    repo_url: project.repo_url || '', last_updated: project.last_updated || '',
+                    category: project.category || 'other',
+                }),
             });
-            loadMore.classList.add('hidden');
-            updateResultContext();
-            if (data.items.length === 0) {
-                empty.classList.remove('hidden');
-                empty.querySelector('p').textContent = emptyStateMessage({ githubSearch: true });
-            } else {
-                empty.classList.add('hidden');
+            Object.assign(project, imported);
+            id = imported.id;
+            if (imported.is_favorited) {
+                state.favoriteIds.add(id);
+                updateFavoriteButton(button, project);
+                updateFavoriteCount();
+                showToast('这个项目已在收藏中。');
+                return;
             }
-        } catch (e) {
-            console.error('GitHub search failed:', e);
-            state.githubSearch = true;
-            state.query = q;
-            state.total = 0;
-            document.getElementById('project-list').innerHTML = '';
-            document.getElementById('load-more').classList.add('hidden');
-            const empty = document.getElementById('empty-state');
-            empty.classList.remove('hidden');
-            empty.querySelector('p').textContent = emptyStateMessage({ githubSearch: true, reason: 'error' });
-            updateResultContext();
         }
-        btnSearchGithub.disabled = false;
-        btnSearchGithub.textContent = '搜索 GitHub';
-    });
-
-    // Enter key in search triggers GitHub search if local results are empty
-    searchInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            btnSearchGithub.click();
+        const wasFavorite = Boolean(project.is_favorited);
+        try {
+            await api('/favorites/' + id, { method: wasFavorite ? 'DELETE' : 'POST' });
+        } catch (error) {
+            if (wasFavorite || error.status !== 409) throw error;
         }
-    });
-
-    // Refresh button
-    document.getElementById('btn-refresh').addEventListener('click', onRefresh);
-    document.getElementById('btn-retry-failed').addEventListener('click', retryFailedTranslations);
-    document.getElementById('btn-refresh-health').addEventListener('click', checkHealth);
-
-    // Theme toggle
-    document.getElementById('btn-theme').addEventListener('click', toggleTheme);
-    document.getElementById('accent-picker').addEventListener('click', (e) => {
-        const dot = e.target.closest('.accent-dot');
-        if (dot) setAccent(dot.dataset.accent);
-    });
-
-    // Infinite scroll
-    let scrollTimer;
-    window.addEventListener('scroll', () => {
-        clearTimeout(scrollTimer);
-        scrollTimer = setTimeout(() => {
-            if (state.loading || state.recommendMode || state.githubSearch) return;
-            const list = document.getElementById('project-list');
-            if (!list.children.length) return;
-            const shown = list.children.length;
-            if (shown >= state.total) return;
-            const bottomY = list.getBoundingClientRect().bottom;
-            if (bottomY - window.innerHeight < 300) {
-                state.page++;
-                loadProjects(true);
-            }
-        }, 100);
-    });
-
-    // Keyword modal
-    document.getElementById('btn-add-keyword').addEventListener('click', showKeywordModal);
-    document.getElementById('btn-save-keyword').addEventListener('click', saveKeyword);
-    document.getElementById('btn-cancel-keyword').addEventListener('click', () => {
-        document.getElementById('keyword-modal').classList.add('hidden');
-    });
-
-    // Back to top
-    const backTopBtn = document.getElementById('btn-back-top');
-    backTopBtn.addEventListener('click', () => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    });
-    window.addEventListener('scroll', () => {
-        if (window.scrollY > 400) {
-            backTopBtn.classList.add('visible');
-        } else {
-            backTopBtn.classList.remove('visible');
-        }
-    });
-
-    // Close modal on backdrop click
-    document.getElementById('keyword-modal').addEventListener('click', (e) => {
-        if (e.target === e.currentTarget) {
-            e.currentTarget.classList.add('hidden');
-        }
-    });
-
-    // Chat modal
-    document.getElementById('btn-close-chat').addEventListener('click', () => {
-        document.getElementById('chat-modal').classList.add('hidden');
-    });
-    document.getElementById('chat-modal').addEventListener('click', (e) => {
-        if (e.target === e.currentTarget) {
-            e.currentTarget.classList.add('hidden');
-        }
-    });
-    document.getElementById('btn-send-chat').addEventListener('click', () => {
-        sendChat(document.getElementById('chat-input').value);
-    });
-    document.getElementById('chat-input').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendChat(e.target.value);
-        }
-    });
+        project.is_favorited = !wasFavorite;
+        if (project.is_favorited) state.favoriteIds.add(id);
+        else state.favoriteIds.delete(id);
+        state.recommendations = null;
+        updateFavoriteButton(button, project);
+        updateFavoriteCount();
+        showToast(project.is_favorited ? '已加入收藏' : '已取消收藏', 'success');
+        if (state.favoritesMode && !state.githubSearch && !project.is_favorited) await loadProjects();
+    } catch {
+        showToast('收藏未能保存，请重试。', 'error');
+    } finally { button.disabled = false; }
 }
 
-// ========== Theme ==========
-function applyTheme() {
-    document.documentElement.setAttribute('data-theme', state.theme);
-    document.documentElement.setAttribute('data-accent', state.accent);
-    document.querySelectorAll('.accent-dot').forEach((dot) => {
-        dot.setAttribute('aria-pressed', dot.dataset.accent === state.accent ? 'true' : 'false');
-    });
+function updateFavoriteButton(button, project) {
+    button.classList.toggle('favorited', Boolean(project.is_favorited));
+    button.setAttribute('aria-pressed', String(Boolean(project.is_favorited)));
+    button.title = project.is_favorited ? '取消收藏' : '收藏项目';
+    button.setAttribute('aria-label', (project.is_favorited ? '取消收藏 ' : '收藏 ') + project.repo_full_name);
 }
 
-function toggleTheme() {
-    state.theme = state.theme === 'light' ? 'dark' : 'light';
-    localStorage.setItem('theme', state.theme);
-    const root = document.documentElement;
-    root.classList.add('theme-anim');
-    applyTheme();
-    setTimeout(() => root.classList.remove('theme-anim'), 480);
+function updateFavoriteCount() {
+    const count = document.querySelector('[data-count="favorites"]');
+    count.textContent = String(state.favoriteIds.size);
 }
 
-function setAccent(accent) {
-    if (!accent || accent === state.accent) return;
-    state.accent = accent;
-    localStorage.setItem('accent', accent);
-    applyTheme();
-}
-
-// ========== Toast ==========
-let _toastRoot = null;
-function showToast(message, type = 'info') {
-    if (!_toastRoot) _toastRoot = document.getElementById('toast-root');
-    if (!_toastRoot) return;
-    const el = document.createElement('div');
-    el.className = `toast toast-${type}`;
-    el.textContent = message;
-    _toastRoot.appendChild(el);
-    requestAnimationFrame(() => el.classList.add('show'));
-    setTimeout(() => {
-        el.classList.remove('show');
-        setTimeout(() => el.remove(), 320);
-    }, 2400);
-}
-
-// ========== Refresh ==========
-function updateProgressBar(s) {
-    const bar = document.getElementById('refresh-progress');
-    const stage = document.getElementById('progress-stage');
-    const detail = document.getElementById('progress-detail');
-    const fill = document.getElementById('progress-fill');
-
-    if (!s.is_refreshing) {
-        bar.classList.add('hidden');
-        return;
+async function loadNavigation() {
+    const results = await Promise.allSettled([api('/categories'), api('/favorites/ids')]);
+    if (results[0].status === 'fulfilled') {
+        let total = 0;
+        results[0].value.forEach(category => {
+            total += category.count;
+            const count = [...document.querySelectorAll('[data-count]')].find(element => element.dataset.count === category.key);
+            if (count) count.textContent = String(category.count);
+        });
+        document.querySelector('[data-count="all"]').textContent = String(total);
     }
+    if (results[1].status === 'fulfilled') {
+        state.favoriteIds = new Set(results[1].value);
+        updateFavoriteCount();
+    }
+}
 
-    bar.classList.remove('hidden');
-    const stageNames = {
-        scraping: '\u6293\u53D6\u9879\u76EE\u4E2D...',
-        translating: '\u7FFB\u8BD1\u4E2D...',
-        scoring: '\u8BA1\u7B97\u8BC4\u5206...'
+async function loadLanguages() {
+    try { state.languages = await api('/languages'); updateLanguageOptions(); } catch { /* The project list has its own connection error. */ }
+}
+
+function updateLanguageOptions() {
+    const select = $('filter-language');
+    const languages = new Set([...state.languages, ...(state.remoteItems || []).map(project => project.language)].filter(Boolean));
+    if (state.language) languages.add(state.language);
+    select.replaceChildren(new Option('全部语言', ''));
+    [...languages].sort().forEach(language => select.add(new Option(language, language)));
+    select.value = state.language;
+}
+
+function statusSignature(status) {
+    return [status.total_projects, status.translation_done, status.translation_pending, status.translation_failed, status.is_refreshing].join('|');
+}
+
+async function checkStatus() {
+    if (statusBusy) return;
+    statusBusy = true;
+    try {
+        const previous = state.status;
+        const status = await api('/status');
+        state.status = status;
+        updateStatusUI();
+        const finished = previous?.is_refreshing && !status.is_refreshing;
+        if (finished) {
+            sparklineCache.clear();
+            await Promise.allSettled([loadNavigation(), loadLanguages(), checkHealth()]);
+            if (status.last_refresh_error) showToast('更新未完成，请在状态面板查看原因。', 'error');
+            else showToast('项目库已更新', 'success');
+        }
+        const changed = previous && statusSignature(previous) !== statusSignature(status);
+        const reading = document.querySelector('dialog[open]') || $('project-list').contains(document.activeElement);
+        if (changed && !reading && !state.loading && state.page === 1 && !state.githubSearch && !state.recommendMode) loadProjects();
+    } catch {
+        $('status-label').textContent = '连接中断';
+        $('btn-status').dataset.tone = 'error';
+        $('btn-status').setAttribute('aria-label', '连接中断，查看状态');
+    } finally { statusBusy = false; }
+}
+
+function updateStatusUI() {
+    const status = state.status;
+    if (!status) return;
+    $('overview-total').textContent = Number(status.total_projects || 0).toLocaleString('zh-CN');
+    $('overview-freshness').textContent = status.is_data_stale ? '需更新' : status.last_fetched ? '已更新' : '待初始化';
+    $('overview-translations').textContent = Number(status.translation_done || 0).toLocaleString('zh-CN');
+    const date = parseProjectDate(status.last_fetched);
+    $('last-updated').textContent = date ? '更新于 ' + timeAgo(status.last_fetched) : '等待首次更新';
+    $('overview-freshness-note').textContent = date ? '上次更新：' + date.toLocaleString('zh-CN', { hour12: false }) : '尚未抓取项目。';
+    $('translation-summary-detail').textContent = formatTranslationSummary(status);
+    $('btn-retry-failed').disabled = !((status.translation_retry || 0) + (status.translation_failed || 0));
+    $('refresh-progress').classList.toggle('hidden', !status.is_refreshing);
+    $('progress-stage').textContent = { scraping: '正在更新项目', scoring: '正在计算排序' }[status.refresh_stage] || '准备更新';
+    $('progress-detail').textContent = status.refresh_detail || '';
+    const progress = status.translate_total ? Math.round(status.translate_done / status.translate_total * 100) : 8;
+    $('progress-fill').style.width = Math.min(100, Math.max(8, progress)) + '%';
+    $('btn-refresh').disabled = status.is_refreshing;
+    $('btn-refresh').classList.toggle('refreshing', status.is_refreshing);
+    let label = '已更新', tone = 'ok';
+    if (status.is_refreshing) { label = '更新中'; tone = 'working'; }
+    else if (status.translation_processing || status.translation_pending) { label = '翻译中'; tone = 'working'; }
+    else if (status.last_refresh_error || status.is_data_stale || state.health?.status === 'warning') { label = '需要检查'; tone = 'warning'; }
+    else if (!status.last_fetched) { label = '待初始化'; tone = 'warning'; }
+    $('status-label').textContent = label;
+    $('btn-status').dataset.tone = tone;
+    $('btn-status').setAttribute('aria-label', label + '，查看更新与翻译状态');
+}
+
+function healthProblem(problem) {
+    const labels = {
+        'API_KEY is not configured': '模型密钥尚未配置，翻译与问答暂不可用。',
+        'GITHUB_TOKEN is not configured; GitHub API rate limits will be lower': '未配置 GitHub Token，抓取时更容易受到频率限制。',
+        'Proxy is not configured': '未设置代理，请确认可以直接访问 GitHub 与模型服务。',
+        'Database check failed': '项目库连接失败。',
+        'Project data is stale': '项目数据较旧，建议更新项目库。',
     };
-    stage.textContent = stageNames[s.refresh_stage] || '\u51C6\u5907\u4E2D...';
-
-    detail.textContent = s.refresh_detail || '';
-
-    if (s.translate_total > 0) {
-        const pct = Math.round((s.translate_done / s.translate_total) * 100);
-        fill.style.width = Math.max(pct, 5) + '%';
-        if (s.refresh_stage === 'translating') {
-            detail.textContent = `${s.translate_done} / ${s.translate_total} (${pct}%)`;
-        }
-    } else if (s.refresh_stage === 'scoring') {
-        fill.style.width = '95%';
-    } else {
-        fill.style.width = '10%';
-    }
+    if (problem.startsWith('Last refresh failed: ')) return '上次更新失败：' + problem.slice(21);
+    if (problem.startsWith("Model '")) return '配置的模型当前不可用，请检查模型名称。';
+    return labels[problem] || problem;
 }
 
-async function onRefresh() {
-    const btn = document.getElementById('btn-refresh');
-    btn.classList.add('refreshing');
-    btn.disabled = true;
+async function checkHealth() {
+    $('btn-refresh-health').disabled = true;
+    try {
+        const health = await api('/health');
+        state.health = health;
+        const problems = Array.isArray(health.problems) ? health.problems : [];
+        $('overview-health').textContent = problems.length ? '有 ' + problems.length + ' 项需要检查' : '连接正常';
+        $('health-summary').classList.toggle('hidden', !problems.length);
+        $('health-summary-detail').textContent = problems.map(healthProblem).join('\n');
+        $('overview-health-note').textContent = health.checks?.model_api_key?.model ? '当前模型：' + health.checks.model_api_key.model : '';
+        updateStatusUI();
+    } catch {
+        state.health = { status: 'warning' };
+        $('overview-health').textContent = '无法连接到服务';
+        $('overview-health-note').textContent = '请确认应用服务正在运行，再重新检查。';
+        updateStatusUI();
+    } finally { $('btn-refresh-health').disabled = false; }
+}
+
+async function refreshProjects() {
+    if ($('btn-refresh').disabled) return;
+    $('btn-refresh').disabled = true;
     try {
         await api('/refresh', { method: 'POST' });
-        showToast('已开始刷新数据', 'info');
-        const poll = setInterval(async () => {
-            const s = await api('/status');
-            updateStatusUI(s);
-            if (!s.is_refreshing) {
-                clearInterval(poll);
-                btn.classList.remove('refreshing');
-                btn.disabled = false;
-                state.page = 1;
-                await loadLanguages();
-                await loadProjects();
-            }
-        }, 1000);
-    } catch (e) {
-        btn.classList.remove('refreshing');
-        btn.disabled = false;
+        showToast('已开始更新项目库');
+        await checkStatus();
+    } catch {
+        $('btn-refresh').disabled = false;
+        showToast('未能开始更新，请检查服务连接。', 'error');
     }
 }
 
-async function retryFailedTranslations() {
-    const btn = document.getElementById('btn-retry-failed');
-    btn.disabled = true;
+async function retryTranslations() {
+    $('btn-retry-failed').disabled = true;
     try {
         await api('/translations/retry-failed', { method: 'POST' });
-        showToast('已加入重试队列', 'info');
-        const status = await api('/status');
-        updateStatusUI(status);
-        if (!state.recommendMode && !state.githubSearch && state.page === 1) {
-            await loadProjects();
-        }
-    } catch (e) {
-        console.error('Failed to retry translations:', e);
+        showToast('已加入翻译重试队列');
+        await checkStatus();
+    } catch {
+        $('btn-retry-failed').disabled = false;
+        showToast('未能开始重试，请稍后再试。', 'error');
     }
-    btn.disabled = false;
 }
 
-// ========== README Toggle ==========
-function toggleReadme(btn) {
-    const content = btn.nextElementSibling;
-    const arrow = btn.querySelector('.readme-toggle-icon');
-    content.classList.toggle('expanded');
-    arrow.textContent = content.classList.contains('expanded') ? '\u25B2' : '\u25BC';
+function applyTheme() {
+    const dark = state.theme === 'dark' || (state.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    document.documentElement.dataset.accent = state.accent;
+    $('theme-select').value = state.theme;
+    document.querySelectorAll('[data-accent]').forEach(button => {
+        if (button.tagName === 'BUTTON') button.setAttribute('aria-pressed', String(button.dataset.accent === state.accent));
+    });
 }
 
-// ========== Keyword Modal ==========
-async function showKeywordModal() {
-    document.getElementById('keyword-modal').classList.remove('hidden');
-    document.getElementById('keyword-input').value = '';
-    await loadKeywords();
+function applyView() {
+    $('project-list').dataset.view = state.view;
+    document.querySelectorAll('[data-view]').forEach(button => {
+        if (button.tagName === 'BUTTON') button.setAttribute('aria-pressed', String(button.dataset.view === state.view));
+    });
+}
+
+function openDialog(id) {
+    const dialog = $(id);
+    if (!dialog.open) dialog.showModal();
+}
+
+function closeNavigation() {
+    $('site-header').classList.remove('is-open');
+    $('btn-menu').setAttribute('aria-expanded', 'false');
+    $('btn-menu').setAttribute('aria-label', '展开导航');
+}
+
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = 'toast toast-' + type;
+    toast.innerHTML = icon(type === 'success' ? 'check' : 'info') + '<span>' + escapeHtml(message) + '</span>';
+    const root = document.querySelector('dialog[open]') || $('toast-root');
+    if (root.tagName === 'DIALOG') {
+        toast.classList.add('dialog-toast');
+        root.append(toast);
+    } else root.append(toast);
+    requestAnimationFrame(() => toast.classList.add('show'));
+    setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 200); }, 2800);
 }
 
 async function loadKeywords() {
+    const list = $('keyword-list');
+    list.textContent = '正在读取关注关键词…';
     try {
         const keywords = await api('/keywords');
-        const list = document.getElementById('keyword-list');
-        list.innerHTML = '';
-        keywords.forEach((kw) => {
+        list.replaceChildren();
+        if (!keywords.length) {
+            list.innerHTML = '<p class="keyword-empty">还没有关注的关键词</p>';
+            return;
+        }
+        keywords.forEach(keyword => {
             const item = document.createElement('div');
             item.className = 'keyword-item';
-
-            const label = document.createElement('span');
-            label.textContent = `${kw.keyword} (${kw.category})`;
-
+            item.innerHTML = '<span>' + escapeHtml(keyword.keyword) + '<small>' + escapeHtml(categoryNames[keyword.category] || '其他热门') + '</small></span>';
             const button = document.createElement('button');
-            button.className = 'keyword-delete';
             button.type = 'button';
-            button.textContent = '\u2715';
-            button.addEventListener('click', () => deleteKeyword(kw.id));
-
-            item.appendChild(label);
-            item.appendChild(button);
-            list.appendChild(item);
+            button.className = 'icon-button';
+            button.setAttribute('aria-label', '删除关键词 ' + keyword.keyword);
+            button.innerHTML = icon('close');
+            button.addEventListener('click', async () => {
+                button.disabled = true;
+                try { await api('/keywords/' + keyword.id, { method: 'DELETE' }); await loadKeywords(); }
+                catch { button.disabled = false; showToast('删除失败，请重试。', 'error'); }
+            });
+            item.append(button);
+            list.append(item);
         });
-    } catch (e) { /* ignore */ }
+    } catch { list.textContent = '无法读取关键词，请关闭后重试。'; }
 }
 
-async function saveKeyword() {
-    const keyword = document.getElementById('keyword-input').value.trim();
-    const category = document.getElementById('keyword-category').value;
+async function saveKeyword(event) {
+    event.preventDefault();
+    const keyword = $('keyword-input').value.trim();
     if (!keyword) return;
+    $('btn-save-keyword').disabled = true;
+    $('keyword-error').classList.add('hidden');
     try {
-        await api('/keywords', {
-            method: 'POST',
-            body: JSON.stringify({ keyword, category })
-        });
-        document.getElementById('keyword-input').value = '';
+        await api('/keywords', { method: 'POST', body: JSON.stringify({ keyword, category: $('keyword-category').value }) });
+        $('keyword-input').value = '';
         await loadKeywords();
-    } catch (e) {
-        alert('\u6DFB\u52A0\u5931\u8D25\uFF0C\u5173\u952E\u8BCD\u53EF\u80FD\u5DF2\u5B58\u5728');
-    }
+        showToast('已添加关注，下次更新时生效。', 'success');
+    } catch (error) {
+        $('keyword-error').textContent = error.status === 409 ? '已经关注过这个关键词。' : '添加失败，请检查连接后重试。';
+        $('keyword-error').classList.remove('hidden');
+    } finally { $('btn-save-keyword').disabled = false; }
 }
 
-async function deleteKeyword(id) {
-    try {
-        await api(`/keywords/${id}`, { method: 'DELETE' });
-        await loadKeywords();
-    } catch (e) { /* ignore */ }
+function openChat(project) {
+    chat.controller?.abort();
+    chat.generation++;
+    chat.controller = null;
+    chat.repo = project.repo_full_name;
+    chat.history = [];
+    $('chat-repo-name').textContent = chat.repo;
+    $('chat-input').value = '';
+    setChatBusy(false);
+    $('chat-messages').innerHTML = '<div class="chat-welcome">' + icon('sparkles') +
+        '<h3>进一步了解这个项目</h3><p>基于项目介绍和 README，帮你判断它是否适合你。</p><div class="chat-suggestions">' +
+        ['适合什么场景使用？', '核心优势是什么？', '如何快速上手？', '有哪些局限性？'].map(question =>
+            '<button class="chat-suggestion" type="button" data-question="' + question + '">' + question + '</button>').join('') +
+        '</div></div>';
+    openDialog('chat-modal');
+    $('chat-input').focus();
 }
 
-// ========== AI Chat ==========
-let chatHistory = [];
-let chatRepo = '';
+function openReader(project) {
+    reader.project = project;
+    $('reader-repo').textContent = project.repo_full_name;
+    $('reader-content').innerHTML = renderProjectReading(project);
+    $('reader-github').href = safeExternalUrl(project.repo_url);
+    applyReaderSize();
+    openDialog('reader-modal');
+    $('reader-scroll').scrollTop = 0;
+    $('reader-content').querySelector('h2').focus({ preventScroll: true });
+}
 
-function openChat(repoName) {
-    chatRepo = repoName;
-    chatHistory = [];
-    document.getElementById('chat-repo-name').textContent = repoName;
-    document.getElementById('chat-messages').innerHTML = `
-        <div class="chat-welcome">
-            <p>你可以问我关于这个项目的任何问题，比如：</p>
-            <div class="chat-suggestions">
-                <button class="chat-suggestion" data-q="这个项目适合什么场景使用？">适合什么场景？</button>
-                <button class="chat-suggestion" data-q="这个项目的核心优势是什么？和同类项目相比如何？">核心优势是什么？</button>
-                <button class="chat-suggestion" data-q="如何快速上手这个项目？需要什么前置条件？">如何快速上手？</button>
-                <button class="chat-suggestion" data-q="这个项目有什么局限性或注意事项？">有什么局限性？</button>
-            </div>
-        </div>`;
-    document.getElementById('chat-modal').classList.remove('hidden');
-    document.getElementById('chat-input').focus();
-
-    // Bind suggestion buttons
-    document.querySelectorAll('.chat-suggestion').forEach(btn => {
-        btn.addEventListener('click', () => sendChat(btn.dataset.q));
+function applyReaderSize() {
+    $('reader-modal').dataset.readingSize = reader.size;
+    $('reader-size').querySelectorAll('button').forEach(button => {
+        button.setAttribute('aria-pressed', String(button.dataset.readerSize === reader.size));
     });
 }
 
+function setChatBusy(busy) {
+    $('chat-input').disabled = busy;
+    $('btn-send-chat').disabled = busy;
+    $('btn-send-chat').classList.toggle('hidden', busy);
+    $('btn-stop-chat').classList.toggle('hidden', !busy);
+}
+
 async function sendChat(message) {
-    if (!message || !message.trim()) return;
-    const msg = message.trim();
-    const messagesEl = document.getElementById('chat-messages');
-    const input = document.getElementById('chat-input');
-    const sendBtn = document.getElementById('btn-send-chat');
-
-    // Remove welcome if present
-    const welcome = messagesEl.querySelector('.chat-welcome');
-    if (welcome) welcome.remove();
-
-    // Add user message
-    const userDiv = document.createElement('div');
-    userDiv.className = 'chat-msg chat-msg-user';
-    userDiv.textContent = msg;
-    messagesEl.appendChild(userDiv);
-
-    // Add AI message placeholder
-    const aiDiv = document.createElement('div');
-    aiDiv.className = 'chat-msg chat-msg-ai';
-    aiDiv.innerHTML = '<span class="chat-typing">思考中...</span>';
-    messagesEl.appendChild(aiDiv);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-
-    input.value = '';
-    input.disabled = true;
-    sendBtn.disabled = true;
-
+    const text = (message || '').trim();
+    if (!text || chat.controller) return;
+    const generation = chat.generation;
+    const controller = new AbortController();
+    chat.controller = controller;
+    setChatBusy(true);
+    const messages = $('chat-messages');
+    messages.querySelector('.chat-welcome')?.remove();
+    const user = document.createElement('div');
+    user.className = 'chat-msg chat-msg-user';
+    user.textContent = text;
+    const answer = document.createElement('div');
+    answer.className = 'chat-msg chat-msg-ai';
+    answer.innerHTML = '<span class="chat-typing">正在阅读项目信息…</span>';
+    messages.append(user, answer);
+    messages.scrollTop = messages.scrollHeight;
+    $('chat-input').value = '';
+    let reply = '';
+    let completed = false;
     try {
-        const resp = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                repo_full_name: chatRepo,
-                message: msg,
-                history: chatHistory
-            })
+        const response = await fetch('/api/chat', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ repo_full_name: chat.repo, message: text, history: chat.history }),
+            signal: controller.signal,
         });
-
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let aiText = '';
-        aiDiv.innerHTML = '';
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const chunk = decoder.decode(value);
-            const lines = chunk.split('\n');
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const data = line.slice(6).trim();
-                    if (data === '[DONE]') break;
-                    try {
-                        const parsed = JSON.parse(data);
-                        if (parsed.content) {
-                            aiText += parsed.content;
-                            aiDiv.innerHTML = formatChatText(aiText);
-                            messagesEl.scrollTop = messagesEl.scrollHeight;
-                        }
-                    } catch (e) {}
-                }
-            }
+        if (!response.ok) throw new Error('Chat request failed');
+        for await (const part of streamChatText(response.body)) {
+            if (generation !== chat.generation) return;
+            reply += part;
+            answer.innerHTML = formatChatText(reply);
+            messages.scrollTop = messages.scrollHeight;
         }
-
-        chatHistory.push({ role: 'user', content: msg });
-        chatHistory.push({ role: 'assistant', content: aiText });
-    } catch (e) {
-        aiDiv.innerHTML = '<span style="color:#ef4444">请求失败，请重试</span>';
+        if (!reply.trim()) throw new Error('The model returned no content');
+        completed = true;
+    } catch (error) {
+        if (generation !== chat.generation) return;
+        const stopped = error.name === 'AbortError';
+        if (stopped && reply) completed = true;
+        const note = stopped ? '已停止回答。' : '回答未能完成，请检查模型连接后重试。';
+        answer.innerHTML = formatChatText(reply) + (reply ? '<br><br>' : '') + '<span class="' + (stopped ? 'muted' : 'chat-error') + '">' + note + '</span>';
+    } finally {
+        if (generation === chat.generation) {
+            if (completed) chat.history.push({ role: 'user', content: text }, { role: 'assistant', content: reply });
+            chat.history = chat.history.slice(-6);
+            chat.controller = null;
+            setChatBusy(false);
+            if ($('chat-modal').open) $('chat-input').focus();
+        }
     }
-
-    input.disabled = false;
-    sendBtn.disabled = false;
-    input.focus();
 }
 
-// ========== Start ==========
-if (typeof document !== 'undefined') {
-    document.addEventListener('DOMContentLoaded', init);
+function bindEvents() {
+    document.querySelectorAll('.tab[data-category]').forEach(tab => tab.addEventListener('click', () => selectCategory(tab.dataset.category)));
+    document.querySelectorAll('[data-source]').forEach(button => button.addEventListener('click', () => selectSource(button.dataset.source)));
+    $('search-input').addEventListener('input', event => {
+        if (event.isComposing) return;
+        clearTimeout(searchTimer);
+        $('btn-clear-search').classList.toggle('hidden', !$('search-input').value);
+        $('search-shortcut').classList.toggle('hidden', Boolean($('search-input').value));
+        if (state.githubSearch) return;
+        requests.cancel();
+        setLoading(false);
+        state.query = $('search-input').value.trim();
+        updateFilterUI();
+        searchTimer = setTimeout(() => loadProjects(), 300);
+    });
+    $('search-form').addEventListener('submit', event => {
+        event.preventDefault();
+        clearTimeout(searchTimer);
+        state.query = $('search-input').value.trim();
+        loadProjects(false, { force: state.githubSearch });
+    });
+    $('btn-clear-search').addEventListener('click', () => {
+        cancelSearch();
+        state.query = '';
+        $('search-input').value = '';
+        loadProjects();
+        $('search-input').focus();
+    });
+    [['filter-language', 'language'], ['filter-sort', 'sort'], ['filter-stars', 'minStars']].forEach(([id, key]) => {
+        $(id).addEventListener('change', event => {
+            cancelSearch();
+            state[key] = key === 'minStars' ? Number(event.target.value) : event.target.value;
+            loadProjects();
+        });
+    });
+    $('btn-clear-filters').addEventListener('click', clearFilters);
+    $('active-filters').addEventListener('click', event => {
+        const button = event.target.closest('[data-filter]');
+        if (!button) return;
+        cancelSearch();
+        const key = button.dataset.filter;
+        state[key] = key === 'minStars' ? 0 : '';
+        if (key === 'query') $('search-input').value = '';
+        updateModeUI();
+        loadProjects();
+    });
+    document.querySelectorAll('button[data-view]').forEach(button => button.addEventListener('click', () => {
+        state.view = button.dataset.view;
+        savePreference('project-view', state.view);
+        applyView();
+    }));
+    $('project-list').addEventListener('click', event => {
+        const button = event.target.closest('button');
+        const card = button?.closest('.project-card');
+        if (!card) return;
+        const project = state.items.find(item => item.repo_full_name === card.dataset.repo);
+        if (!project) return;
+        if (button.dataset.action === 'reader') openReader(project);
+        if (button.dataset.action === 'chat') openChat(project);
+        if (button.dataset.action === 'favorite') toggleFavorite(project, button);
+        if (button.dataset.action === 'readme') {
+            const expanded = button.getAttribute('aria-expanded') !== 'true';
+            button.setAttribute('aria-expanded', String(expanded));
+            button.querySelector('.readme-label').textContent = expanded ? '收起摘要' : '展开摘要';
+            card.querySelector('.readme-content').classList.toggle('expanded', expanded);
+            if (expanded) expandedProjects.add(project.repo_full_name);
+            else expandedProjects.delete(project.repo_full_name);
+        }
+        if (button.dataset.topic) {
+            cancelSearch();
+            state.query = button.dataset.topic;
+            $('search-input').value = state.query;
+            loadProjects();
+            $('search-input').focus();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    });
+    $('btn-load-more').addEventListener('click', () => loadProjects(true));
+    if ('IntersectionObserver' in window) {
+        const observer = new IntersectionObserver(entries => {
+            if (entries.some(entry => entry.isIntersecting) && !state.hadError) loadProjects(true);
+        }, { rootMargin: '180px' });
+        observer.observe($('load-more'));
+    }
+    $('empty-action').addEventListener('click', () => emptyAction());
+    $('btn-shuffle-rec').addEventListener('click', () => loadProjects(false, { force: true }));
+    $('btn-refresh').addEventListener('click', refreshProjects);
+    $('btn-retry-failed').addEventListener('click', retryTranslations);
+    $('btn-refresh-health').addEventListener('click', checkHealth);
+    ['btn-settings', 'btn-status'].forEach(id => $(id).addEventListener('click', () => {
+        openDialog('settings-modal'); checkHealth(); closeNavigation();
+    }));
+    $('btn-add-keyword').addEventListener('click', () => {
+        $('keyword-error').classList.add('hidden');
+        openDialog('keyword-modal'); loadKeywords(); closeNavigation();
+    });
+    $('keyword-form').addEventListener('submit', saveKeyword);
+    $('theme-select').addEventListener('change', event => {
+        state.theme = event.target.value; savePreference('theme', state.theme); applyTheme();
+    });
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (state.theme === 'system') applyTheme(); });
+    $('accent-picker').addEventListener('click', event => {
+        const button = event.target.closest('button[data-accent]');
+        if (!button) return;
+        state.accent = button.dataset.accent; savePreference('accent', state.accent); applyTheme();
+    });
+    $('btn-menu').addEventListener('click', () => {
+        const expanded = $('site-header').classList.toggle('is-open');
+        $('btn-menu').setAttribute('aria-expanded', String(expanded));
+        $('btn-menu').setAttribute('aria-label', expanded ? '收起导航' : '展开导航');
+    });
+    document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => $(button.dataset.close).close()));
+    document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('click', event => {
+        const bounds = dialog.getBoundingClientRect();
+        if (event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) dialog.close();
+    }));
+    $('chat-modal').addEventListener('close', () => { chat.generation++; chat.controller?.abort(); chat.controller = null; });
+    $('reader-modal').addEventListener('close', () => { reader.project = null; });
+    $('reader-size').addEventListener('click', event => {
+        const button = event.target.closest('button[data-reader-size]');
+        if (!button) return;
+        reader.size = button.dataset.readerSize;
+        savePreference('reader-size', reader.size);
+        applyReaderSize();
+    });
+    $('reader-chat').addEventListener('click', () => { if (reader.project) openChat(reader.project); });
+    $('chat-form').addEventListener('submit', event => { event.preventDefault(); sendChat($('chat-input').value); });
+    $('chat-input').addEventListener('keydown', event => {
+        if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+            event.preventDefault(); sendChat(event.target.value);
+        }
+    });
+    $('chat-messages').addEventListener('click', event => {
+        const button = event.target.closest('[data-question]');
+        if (button) sendChat(button.dataset.question);
+    });
+    $('btn-stop-chat').addEventListener('click', () => chat.controller?.abort());
+    document.addEventListener('click', event => {
+        const filters = $('filter-panel');
+        if (filters.open && !filters.contains(event.target)) filters.open = false;
+    });
+    document.addEventListener('keydown', event => {
+        if (document.querySelector('dialog[open]')) return;
+        if (event.key === 'Escape' && $('filter-panel').open) {
+            $('filter-panel').open = false;
+            $('filter-panel').querySelector('summary').focus();
+            return;
+        }
+        if (event.key === 'Escape' && $('site-header').classList.contains('is-open')) {
+            closeNavigation();
+            $('btn-menu').focus();
+            return;
+        }
+        const editing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable;
+        if ((event.key.toLowerCase() === 'k' && (event.ctrlKey || event.metaKey)) || (event.key === '/' && !editing)) {
+            event.preventDefault(); $('search-input').focus(); $('search-input').select();
+        }
+        if (event.key === 'Escape' && document.activeElement === $('search-input')) $('btn-clear-search').click();
+    });
+    $('btn-back-top').addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+    window.addEventListener('scroll', () => $('btn-back-top').classList.toggle('visible', window.scrollY > 600), { passive: true });
 }
+
+if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', init);

@@ -6,6 +6,9 @@ services:
       - "127.0.0.1:${APP_HOST_PORT:-8098}:8000"
     volumes:
       - ./data:/app/data
+      # Keep local code in sync without rebuilding the dependency image.
+      - ./app:/app/app:ro
+      - ./static:/app/static:ro
     env_file:
       - .env
     environment:

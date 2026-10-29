@@ -588,3 +588,70 @@ def test_star_history_batch_returns_most_recent_points(client):
 
     everything = client.get(f"/api/star-history?ids={project_id}").json()
     assert len(everything[str(project_id)]) == 3
+
+
+@pytest.mark.parametrize("query,expected", [
+    ("observability", "search/topics"),
+    ("日报汇总", "search/summary"),
+    ("100%", "search/literal"),
+])
+def test_project_search_includes_topics_summaries_and_literal_text(client, query, expected):
+    conn = get_connection()
+    conn.executemany(
+        "INSERT INTO projects (repo_full_name, description, topics, readme_summary_zh) VALUES (?, ?, ?, ?)",
+        [
+            ("search/topics", "Monitor services", '["observability"]', ""),
+            ("search/summary", "Reports", '[]', "自动生成日报汇总"),
+            ("search/literal", "100% local", '[]', ""),
+            ("search/other", "100 unrelated tools", '[]', ""),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    data = client.get("/api/projects", params={"q": query}).json()
+    assert data["total"] == 1
+    assert data["items"][0]["repo_full_name"] == expected
+
+
+def test_favorites_apply_search_language_and_star_filters_before_pagination(client):
+    conn = get_connection()
+    for name, language, stars in (
+        ("saved/python", "Python", 5000),
+        ("saved/small", "Python", 100),
+        ("saved/rust", "Rust", 9000),
+    ):
+        cursor = conn.execute(
+            "INSERT INTO projects (repo_full_name, language, stars, topics) VALUES (?, ?, ?, ?)",
+            (name, language, stars, '["observability"]'),
+        )
+        conn.execute("INSERT INTO favorites (project_id) VALUES (?)", (cursor.lastrowid,))
+    conn.commit()
+    conn.close()
+
+    response = client.get("/api/favorites", params={
+        "q": "observability", "language": "Python", "min_stars": 1000, "page_size": 1,
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert data["items"][0]["repo_full_name"] == "saved/python"
+    assert data["items"][0]["is_favorited"] is True
+
+
+def test_project_star_filter_and_newest_sort(client):
+    conn = get_connection()
+    conn.executemany(
+        "INSERT INTO projects (repo_full_name, stars, first_seen_at) VALUES (?, ?, ?)",
+        [
+            ("discovery/old", 5000, "2026-09-01 00:00:00"),
+            ("discovery/new", 2000, "2026-09-09 00:00:00"),
+            ("discovery/small", 10, "2026-09-10 00:00:00"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    data = client.get("/api/projects", params={"min_stars": 1000, "sort": "newest"}).json()
+    assert data["total"] == 2
+    assert [item["repo_full_name"] for item in data["items"]] == ["discovery/new", "discovery/old"]

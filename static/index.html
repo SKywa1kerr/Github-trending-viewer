@@ -3,225 +3,183 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GitHub 热门项目</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Outfit:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/css/style.css?v=30">
+    <meta name="color-scheme" content="light dark">
+    <meta name="description" content="用中文发现、了解和收藏值得关注的 GitHub 开源项目。">
+    <title>发现 · GitHub Trending</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='11' fill='%230071e3'/%3E%3Cpath d='m15 13-7 7 7 7m10-14 7 7-7 7m-3-18-4 22' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/css/style.css?v=54">
 </head>
 <body>
-    <div id="app">
-        <!-- 加载页面 -->
-        <div id="loading-screen" class="loading-screen">
-            <div class="loading-spinner"></div>
-            <p>正在初始化数据，请稍候...</p>
-        </div>
+    <a class="skip-link" href="#project-list">跳到项目列表</a>
+    <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <symbol id="icon-code" viewBox="0 0 24 24"><path d="m8 6-6 6 6 6m8-12 6 6-6 6M14 3l-4 18"/></symbol>
+        <symbol id="icon-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m16 8-2.5 5.5L8 16l2.5-5.5Z"/></symbol>
+        <symbol id="icon-sparkles" viewBox="0 0 24 24"><path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4ZM20 2v4m-2-2h4"/></symbol>
+        <symbol id="icon-tool" viewBox="0 0 24 24"><path d="M14.5 6.5a5 5 0 0 0-6.2 6.2L3 18a2.1 2.1 0 0 0 3 3l5.3-5.3a5 5 0 0 0 6.2-6.2l-3 3-3-3Z"/></symbol>
+        <symbol id="icon-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></symbol>
+        <symbol id="icon-box" viewBox="0 0 24 24"><path d="m12 3 9 5v8l-9 5-9-5V8Zm0 10 9-5m-9 5L3 8m9 5v8M7.5 5.5l9 5"/></symbol>
+        <symbol id="icon-bookmark" viewBox="0 0 24 24"><path d="M6 4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17l-6-4-6 4Z"/></symbol>
+        <symbol id="icon-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3L2.9 9.6l6.3-.9Z"/></symbol>
+        <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+        <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+        <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+        <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M7 17 17 7M7 7h10v10"/></symbol>
+        <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.2 6.2a8 8 0 0 1 13 2L20 12M4 12l.8 3.8a8 8 0 0 0 13 2"/></symbol>
+        <symbol id="icon-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+        <symbol id="icon-list" viewBox="0 0 24 24"><path d="M9 5h12M9 12h12M9 19h12M3 5h1M3 12h1M3 19h1"/></symbol>
+        <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+        <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+        <symbol id="icon-chat" viewBox="0 0 24 24"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-2 2V11.5a9.5 9.5 0 0 1 19 0Z"/><path d="M7 10h10M7 14h6"/></symbol>
+        <symbol id="icon-send" viewBox="0 0 24 24"><path d="m3 3 19 9-19 9 4-9Zm4 9h15"/></symbol>
+        <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+        <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+        <symbol id="icon-up" viewBox="0 0 24 24"><path d="m6 12 6-6 6 6M12 6v14"/></symbol>
+        <symbol id="icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></symbol>
+        <symbol id="icon-book" viewBox="0 0 24 24"><path d="M12 6c-3-2-6-2-9-1v15c3-1 6-1 9 1m0-15c3-2 6-2 9-1v15c-3-1-6-1-9 1V6"/></symbol>
+    </svg>
 
-        <!-- 主内容 -->
-        <div id="main-content" class="main-content hidden">
-            <!-- 顶部栏 -->
-            <header class="header">
-                <div class="header-left">
-                    <div class="title-kicker">Open Source Radar</div>
-                    <h1 class="title">GitHub <span class="title-accent">Trending</span></h1>
-                    <span id="last-updated" class="last-updated">正在读取状态...</span>
+    <div id="loading-screen" class="loading-screen"><span class="spinner"></span><p>正在读取项目库</p></div>
+
+    <div id="main-content" class="app-shell hidden">
+        <header id="site-header" class="site-header">
+            <div class="header-inner">
+                <a href="/" class="brand" aria-label="GitHub Trending 首页">
+                    <span class="brand-mark"><svg class="icon"><use href="#icon-code"/></svg></span>
+                    <span class="brand-name"><span class="brand-prefix">GitHub </span>Trending</span>
+                </a>
+                <nav id="navigation" class="mode-nav" aria-label="主导航">
+                    <button class="tab mode-tab active" type="button" data-mode="discover" data-category="all" aria-current="page">发现</button>
+                    <button class="tab mode-tab" type="button" data-category="recommend">为你推荐</button>
+                    <button class="tab mode-tab" type="button" data-category="favorites">我的收藏<span class="nav-count" data-count="favorites"></span></button>
+                </nav>
+                <div class="header-actions">
+                    <button id="btn-add-keyword" class="utility-button" type="button" aria-label="关注关键词" title="关注关键词"><svg class="icon"><use href="#icon-plus"/></svg><span class="utility-label">关注关键词</span></button>
+                    <button id="btn-refresh" class="icon-button" type="button" aria-label="更新项目" title="更新项目"><svg class="icon"><use href="#icon-refresh"/></svg></button>
+                    <button id="btn-settings" class="icon-button" type="button" aria-label="显示与状态" title="显示与状态"><svg class="icon"><use href="#icon-settings"/></svg></button>
+                    <button id="btn-menu" class="icon-button mobile-menu" type="button" aria-label="展开导航" aria-expanded="false" aria-controls="navigation"><svg class="icon"><use href="#icon-menu"/></svg></button>
                 </div>
-                <div class="header-right">
-                    <button id="btn-refresh" class="btn btn-refresh" title="刷新数据">
-                        <svg class="icon-refresh" viewBox="0 0 24 24" width="18" height="18">
-                            <path d="M17.65 6.35A7.96 7.96 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" fill="currentColor"/>
-                        </svg>
-                        <span>刷新</span>
-                    </button>
-                    <button id="btn-theme" class="btn btn-theme" title="切换主题">
-                        <svg class="icon-theme" viewBox="0 0 24 24" width="18" height="18">
-                            <path d="M12 3a9 9 0 109 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 01-4.4 2.26 5.403 5.403 0 01-3.14-9.8c-.44-.06-.9-.1-1.36-.1z" fill="currentColor"/>
-                        </svg>
-                    </button>
-                    <div class="accent-picker" id="accent-picker" role="group" aria-label="强调色">
-                        <button class="accent-dot" type="button" data-accent="teal" title="青绿" aria-label="青绿"></button>
-                        <button class="accent-dot" type="button" data-accent="indigo" title="蓝色" aria-label="蓝色"></button>
-                        <button class="accent-dot" type="button" data-accent="amber" title="琥珀" aria-label="琥珀"></button>
-                        <button class="accent-dot" type="button" data-accent="rose" title="玫红" aria-label="玫红"></button>
+            </div>
+        </header>
+
+        <main class="workspace">
+            <header class="page-header">
+                <div class="page-introduction">
+                    <svg class="branch-signature" width="108" height="28" viewBox="0 0 108 28" aria-hidden="true" focusable="false">
+                        <path d="M8 20h30c16 0 16-12 32-12h30M38 20h38"/>
+                        <circle class="branch-node branch-node-devtools" cx="8" cy="20" r="4"/>
+                        <circle class="branch-node branch-node-tools" cx="38" cy="20" r="4"/>
+                        <circle class="branch-node branch-node-other" cx="76" cy="20" r="4"/>
+                        <circle class="branch-node branch-node-ai" cx="100" cy="8" r="4"/>
+                    </svg>
+                    <h1 id="page-title">发现值得一试的项目。</h1>
+                    <p id="page-subtitle">开源世界很大，找到适合你的那一部分。</p>
+                </div>
+                <section class="search-section" aria-label="搜索项目">
+                    <form id="search-form" class="search-form" role="search">
+                        <div class="search-field">
+                            <svg class="icon"><use href="#icon-search"/></svg>
+                            <label class="sr-only" for="search-input">搜索项目</label>
+                            <input type="search" id="search-input" placeholder="搜索项目、中文介绍或标签" autocomplete="off" maxlength="200">
+                            <kbd id="search-shortcut">Ctrl K</kbd>
+                            <button id="btn-clear-search" class="icon-button hidden" type="button" aria-label="清除搜索"><svg class="icon"><use href="#icon-close"/></svg></button>
+                        </div>
+                        <button id="btn-search-github" class="button button-primary search-submit" type="submit">搜索</button>
+                    </form>
+                    <div class="search-source" role="group" aria-label="搜索范围">
+                        <span class="search-source-label">搜索范围</span>
+                        <button type="button" data-source="local" aria-pressed="true">项目库</button>
+                        <button type="button" data-source="github" aria-pressed="false">GitHub</button>
                     </div>
-                </div>
+                </section>
             </header>
 
-            <section class="overview">
-                <div class="overview-card">
-                    <span class="overview-label">项目库</span>
-                    <strong id="overview-total">--</strong>
-                    <span class="overview-note">本地缓存</span>
+            <div id="refresh-progress" class="refresh-progress hidden" role="status"><div class="progress-labels"><span id="progress-stage"></span><span id="progress-detail"></span></div><div class="progress-track"><div id="progress-fill"></div></div></div>
+
+            <section class="results-section" aria-label="项目">
+                <div class="discovery-toolbar">
+                    <nav id="category-navigation" class="category-nav" aria-label="项目分类">
+                        <button class="tab category-tab active" type="button" data-category="all" aria-current="page">全部<span class="sr-only" data-count="all"></span></button>
+                        <button class="tab category-tab" type="button" data-category="ai">人工智能<span class="sr-only" data-count="ai"></span></button>
+                        <button class="tab category-tab" type="button" data-category="tools">实用工具<span class="sr-only" data-count="tools"></span></button>
+                        <button class="tab category-tab" type="button" data-category="devtools">开发工具<span class="sr-only" data-count="devtools"></span></button>
+                        <button class="tab category-tab" type="button" data-category="other">更多领域<span class="sr-only" data-count="other"></span></button>
+                    </nav>
+                    <div class="library-controls">
+                        <div class="sort-field"><label class="sr-only" for="filter-sort">排序方式</label><select id="filter-sort"><option value="score">综合推荐</option><option value="stars">最多 Star</option><option value="stars_gained">增长最快</option><option value="updated">最近更新</option><option value="newest">最近收录</option><option value="favorited" hidden>最近收藏</option></select></div>
+                        <details id="filter-panel" class="filter-panel">
+                            <summary><svg class="icon"><use href="#icon-settings"/></svg><span>筛选</span><span id="filter-count" class="filter-count hidden"></span></summary>
+                            <div class="filter-popover">
+                                <div class="filters">
+                                    <div class="select-field"><label for="filter-language">编程语言</label><select id="filter-language"><option value="">全部语言</option></select></div>
+                                    <div class="select-field"><label for="filter-stars">最低 Star 数</label><select id="filter-stars"><option value="0">不限数量</option><option value="1000">1,000 以上</option><option value="10000">10,000 以上</option><option value="50000">50,000 以上</option></select></div>
+                                </div>
+                                <button id="btn-clear-filters" class="text-button hidden" type="button">清除筛选</button>
+                            </div>
+                        </details>
+                        <div class="view-switch" role="group" aria-label="显示方式">
+                            <button type="button" data-view="grid" aria-label="浏览视图" aria-pressed="true" title="浏览视图"><svg class="icon"><use href="#icon-grid"/></svg></button>
+                            <button type="button" data-view="list" aria-label="紧凑列表" aria-pressed="false" title="紧凑列表"><svg class="icon"><use href="#icon-list"/></svg></button>
+                        </div>
+                    </div>
                 </div>
-                <div class="overview-card">
-                    <span class="overview-label">数据状态</span>
-                    <strong id="overview-freshness">--</strong>
-                    <span class="overview-note" id="overview-freshness-note">等待检查</span>
+                <div class="results-toolbar">
+                    <div id="result-context" class="result-context" aria-live="polite"><span id="result-context-label" class="sr-only">项目库</span><strong id="result-context-title">全部项目</strong><span id="result-context-detail"></span></div>
+                    <button id="btn-shuffle-rec" class="text-button hidden" type="button"><svg class="icon"><use href="#icon-refresh"/></svg>重新推荐</button>
                 </div>
-                <div class="overview-card">
-                    <span class="overview-label">翻译队列</span>
-                    <strong id="overview-translations">--</strong>
-                    <span class="overview-note">待处理 / 已完成</span>
-                </div>
-                <div class="overview-card">
-                    <span class="overview-label">系统诊断</span>
-                    <strong id="overview-health">--</strong>
-                    <span class="overview-note" id="overview-health-note">等待检查</span>
-                </div>
+                <div id="active-filters" class="active-filters hidden" aria-label="当前筛选"></div>
+                <div id="project-list" class="project-list" data-view="grid" aria-busy="false" tabindex="-1"></div>
+                <div id="empty-state" class="empty-state hidden"><span class="empty-icon"><svg class="icon"><use href="#icon-search"/></svg></span><h2 id="empty-title">没有找到项目</h2><p id="empty-detail">试试其他关键词，或调整筛选条件。</p><button id="empty-action" class="button button-secondary" type="button">清除筛选</button></div>
+                <div id="load-more" class="load-more hidden"><button id="btn-load-more" class="button button-secondary" type="button">加载更多</button><span id="load-more-note"></span></div>
             </section>
-
-            <!-- 刷新进度条 -->
-            <div id="refresh-progress" class="refresh-progress hidden">
-                <div class="progress-info">
-                    <span id="progress-stage"></span>
-                    <span id="progress-detail"></span>
-                </div>
-                <div class="progress-bar">
-                    <div id="progress-fill" class="progress-fill"></div>
-                </div>
-            </div>
-
-            <section class="status-dock">
-                <div id="translation-summary" class="translation-summary">
-                    <div class="translation-summary-text">
-                        <span id="translation-summary-title">翻译队列</span>
-                        <span id="translation-summary-detail">正在读取状态...</span>
-                    </div>
-                    <button id="btn-retry-failed" class="btn btn-small" type="button">重试失败翻译</button>
-                </div>
-                <div id="health-summary" class="health-summary hidden">
-                    <div class="health-summary-text">
-                        <span id="health-summary-title">系统诊断</span>
-                        <span id="health-summary-detail"></span>
-                    </div>
-                    <button id="btn-refresh-health" class="btn btn-small" type="button">重新检查</button>
-                </div>
-            </section>
-
-            <!-- 板块切换 -->
-            <nav class="category-tabs">
-                <span class="tab-indicator" id="tab-indicator" aria-hidden="true"></span>
-                <button class="tab active" data-category="ai">AI</button>
-                <button class="tab" data-category="tools">实用工具</button>
-                <button class="tab" data-category="devtools">开发工具</button>
-                <button class="tab" data-category="other">其他热门</button>
-                <button class="tab tab-recommend" data-category="recommend">
-                    <svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align:-2px;margin-right:2px"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" fill="currentColor"/></svg>
-                    为你推荐
-                </button>
-                <button class="tab tab-favorites" data-category="favorites">
-                    <svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align:-2px;margin-right:2px"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="currentColor"/></svg>
-                    收藏
-                </button>
-            </nav>
-
-            <!-- 筛选栏 -->
-            <div class="filters">
-                <div class="filter-group">
-                    <label>语言</label>
-                    <select id="filter-language">
-                        <option value="">全部</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>排序</label>
-                    <select id="filter-sort">
-                        <option value="score">综合</option>
-                        <option value="stars">Star 总数</option>
-                        <option value="stars_gained">新增 Star</option>
-                        <option value="updated">最近更新</option>
-                    </select>
-                </div>
-                <div class="filter-group search-group">
-                    <input type="text" id="search-input" placeholder="搜索项目...">
-                    <button id="btn-search-github" class="btn btn-small btn-github-search" title="搜索整个 GitHub">搜索 GitHub</button>
-                </div>
-                <button id="btn-add-keyword" class="btn btn-small" title="添加关注词">+ 添加关注词</button>
-            </div>
-
-            <div id="result-context" class="result-context hidden" aria-live="polite">
-                <span id="result-context-label" class="result-context-label"></span>
-                <div class="result-context-main">
-                    <strong id="result-context-title"></strong>
-                    <span id="result-context-detail"></span>
-                </div>
-            </div>
-
-            <!-- 项目卡片列表 -->
-            <div id="project-list" class="project-list"></div>
-
-            <!-- 滚动加载提示 -->
-            <div id="load-more" class="scroll-loading hidden">
-                <div class="scroll-loading-spinner"></div>
-                <span>加载中...</span>
-            </div>
-
-            <!-- 空状态 -->
-            <div id="empty-state" class="empty-state hidden">
-                <p>暂无项目数据</p>
-            </div>
-        </div>
-
-        <!-- 添加关注词弹窗 -->
-        <div id="keyword-modal" class="modal hidden">
-            <div class="modal-content">
-                <h3>添加关注词</h3>
-                <input type="text" id="keyword-input" placeholder="输入关键词，如 ai agent">
-                <select id="keyword-category">
-                    <option value="ai">AI</option>
-                    <option value="tools">实用工具</option>
-                    <option value="devtools">开发工具</option>
-                    <option value="other">其他</option>
-                </select>
-                <div class="modal-actions">
-                    <button id="btn-save-keyword" class="btn btn-primary">保存</button>
-                    <button id="btn-cancel-keyword" class="btn">取消</button>
-                </div>
-                <div id="keyword-list" class="keyword-list"></div>
-            </div>
-        </div>
-    </div>
-    <!-- AI 聊天弹窗 -->
-    <div id="chat-modal" class="modal hidden">
-        <div class="modal-content chat-modal-content">
-            <div class="chat-header">
-                <div class="chat-title">
-                    <svg viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-3px;margin-right:6px">
-                        <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z" fill="currentColor"/>
-                    </svg>
-                    <span id="chat-repo-name"></span>
-                </div>
-                <button id="btn-close-chat" class="chat-close">&times;</button>
-            </div>
-            <div id="chat-messages" class="chat-messages">
-                <div class="chat-welcome">
-                    <p>你可以问我关于这个项目的任何问题，比如：</p>
-                    <div class="chat-suggestions">
-                        <button class="chat-suggestion" data-q="这个项目适合什么场景使用？">适合什么场景？</button>
-                        <button class="chat-suggestion" data-q="这个项目的核心优势是什么？和同类项目相比如何？">核心优势是什么？</button>
-                        <button class="chat-suggestion" data-q="如何快速上手这个项目？需要什么前置条件？">如何快速上手？</button>
-                        <button class="chat-suggestion" data-q="这个项目有什么局限性或注意事项？">有什么局限性？</button>
-                    </div>
-                </div>
-            </div>
-            <div class="chat-input-area">
-                <input type="text" id="chat-input" placeholder="输入你的问题...">
-                <button id="btn-send-chat" class="btn-send">
-                    <svg viewBox="0 0 24 24" width="20" height="20"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" fill="currentColor"/></svg>
-                </button>
-            </div>
-        </div>
+            <footer class="workspace-footer">
+                <div class="footer-status"><button id="btn-status" class="status-button" type="button" title="查看更新与翻译状态"><span class="status-dot"></span><span id="status-label">数据状态</span></button><span id="last-updated" class="last-updated">正在读取更新状态</span></div>
+                <a href="#page-title">回到顶部 <svg class="icon"><use href="#icon-up"/></svg></a>
+            </footer>
+        </main>
     </div>
 
-    <!-- 轻提示 -->
-    <div id="toast-root" class="toast-root" aria-live="polite"></div>
+    <dialog id="settings-modal" class="dialog settings-dialog" aria-labelledby="settings-title">
+        <div class="dialog-header"><h2 id="settings-title">显示与状态</h2><button class="icon-button" type="button" data-close="settings-modal" aria-label="关闭设置"><svg class="icon"><use href="#icon-close"/></svg></button></div>
+        <div class="dialog-body">
+            <section class="settings-section"><h3>显示</h3><div class="settings-row"><label for="theme-select">外观</label><select id="theme-select"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></div><div class="settings-row"><span>强调色</span><div id="accent-picker" class="accent-picker" role="group" aria-label="强调色"><button type="button" data-accent="indigo" aria-label="蓝色" title="蓝色"></button><button type="button" data-accent="teal" aria-label="青绿" title="青绿"></button><button type="button" data-accent="amber" aria-label="琥珀" title="琥珀"></button><button type="button" data-accent="rose" aria-label="玫红" title="玫红"></button></div></div></section>
+            <section class="settings-section"><h3>项目库</h3><dl class="status-facts"><div><dt>已收录</dt><dd id="overview-total">—</dd></div><div><dt>数据状态</dt><dd id="overview-freshness">—</dd></div><div><dt>已完成翻译</dt><dd id="overview-translations">—</dd></div></dl><p id="overview-freshness-note" class="muted"></p><div class="translation-summary"><p id="translation-summary-detail"></p><button id="btn-retry-failed" class="text-button" type="button">重试失败翻译</button></div></section>
+            <section class="settings-section"><div class="section-title"><h3>连接状态</h3><button id="btn-refresh-health" class="text-button" type="button">重新检查</button></div><p id="overview-health">正在检查</p><div id="health-summary" class="health-summary hidden"><p id="health-summary-detail"></p></div><p id="overview-health-note" class="muted"></p></section>
+        </div>
+    </dialog>
 
-    <!-- 回到顶部 -->
-    <button id="btn-back-top" class="btn-back-top" title="回到顶部">
-        <svg viewBox="0 0 24 24" width="20" height="20">
-            <path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z" fill="currentColor"/>
-        </svg>
-    </button>
-    <script type="module" src="/js/app.js?v=21"></script>
+    <dialog id="keyword-modal" class="dialog" aria-labelledby="keyword-title">
+        <div class="dialog-header"><h2 id="keyword-title">关注关键词</h2><button class="icon-button" type="button" data-close="keyword-modal" aria-label="关闭关键词窗口"><svg class="icon"><use href="#icon-close"/></svg></button></div>
+        <div class="dialog-body"><p class="dialog-description">更新项目库时，一起搜索你关注的方向。</p><form id="keyword-form"><label class="field-label" for="keyword-input">关键词</label><input class="text-input" type="text" id="keyword-input" placeholder="例如：ai agent、数据库、效率工具" maxlength="100" required><label class="field-label" for="keyword-category">归入分类</label><select id="keyword-category"><option value="ai">人工智能</option><option value="tools">实用工具</option><option value="devtools">开发工具</option><option value="other">其他热门</option></select><p id="keyword-error" class="form-error hidden" role="alert"></p><button id="btn-save-keyword" class="button button-primary" type="submit"><svg class="icon"><use href="#icon-plus"/></svg>添加关注</button></form><div id="keyword-list" class="keyword-list"></div></div>
+    </dialog>
+
+    <dialog id="reader-modal" class="dialog reader-dialog" aria-labelledby="reader-title">
+        <div class="reader-toolbar">
+            <div class="reader-location"><svg class="icon" aria-hidden="true"><use href="#icon-book"/></svg><span id="reader-repo">项目阅读</span></div>
+            <div class="reader-controls">
+                <div id="reader-size" class="reader-size" role="group" aria-label="阅读字号">
+                    <button type="button" data-reader-size="standard" aria-pressed="true">标准</button>
+                    <button type="button" data-reader-size="large" aria-pressed="false">大字</button>
+                </div>
+                <button class="icon-button" type="button" data-close="reader-modal" aria-label="关闭项目阅读"><svg class="icon"><use href="#icon-close"/></svg></button>
+            </div>
+        </div>
+        <div id="reader-scroll" class="reader-scroll" tabindex="0" aria-label="项目阅读正文">
+            <article id="reader-content" class="reader-content"></article>
+        </div>
+        <div class="reader-footer">
+            <a id="reader-github" class="button button-secondary" href="#" target="_blank" rel="noopener noreferrer">查看 GitHub<svg class="icon" aria-hidden="true"><use href="#icon-arrow"/></svg></a>
+            <button id="reader-chat" class="button button-primary" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-sparkles"/></svg>向 AI 了解项目</button>
+        </div>
+    </dialog>
+
+    <dialog id="chat-modal" class="dialog chat-dialog" aria-labelledby="chat-repo-name">
+        <div class="dialog-header"><div><span class="dialog-eyebrow">项目问答</span><h2 id="chat-repo-name"></h2></div><button class="icon-button" type="button" data-close="chat-modal" aria-label="关闭项目问答"><svg class="icon"><use href="#icon-close"/></svg></button></div>
+        <div id="chat-messages" class="chat-messages" role="log" aria-label="对话"></div>
+        <form id="chat-form" class="chat-input-area"><label class="sr-only" for="chat-input">关于项目的问题</label><textarea id="chat-input" rows="2" placeholder="关于这个项目，你想了解什么？" maxlength="4000"></textarea><div class="chat-input-footer"><span>Enter 发送，Shift + Enter 换行</span><button id="btn-stop-chat" class="text-button hidden" type="button">停止回答</button><button id="btn-send-chat" class="button button-primary" type="submit" aria-label="发送问题"><svg class="icon"><use href="#icon-send"/></svg></button></div></form>
+    </dialog>
+
+    <div id="toast-root" class="toast-root" role="status" aria-live="polite"></div>
+    <button id="btn-back-top" class="back-top icon-button" type="button" aria-label="回到顶部"><svg class="icon"><use href="#icon-up"/></svg></button>
+    <script type="module" src="/js/app.js?v=42"></script>
 </body>
 </html>

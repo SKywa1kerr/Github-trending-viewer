@@ -12,7 +12,7 @@ import {
 } from '../static/js/app.js';
 
 assert.deepEqual(buildModeState('favorites'), {
-  category: 'ai',
+  category: 'all',
   favoritesMode: true,
   recommendMode: false,
   githubSearch: false,
@@ -20,7 +20,7 @@ assert.deepEqual(buildModeState('favorites'), {
 });
 
 assert.deepEqual(buildModeState('recommend'), {
-  category: 'ai',
+  category: 'all',
   favoritesMode: false,
   recommendMode: true,
   githubSearch: false,

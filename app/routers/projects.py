@@ -1,17 +1,27 @@
 import hashlib
 import json
 import logging
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
+import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from app.ai_client import build_ai_client, extract_json_array, extract_json_object, extract_message_content
 from app.database import get_connection
+from app.github_client import GitHubRequestError
 from app.models import ProjectImportIn
+from app.project_filters import build_project_filters
 from app.scraper import fetch_readme, fetch_search_results, save_projects
 from app.state_store import get_runtime_state, set_runtime_state
 
 router = APIRouter(prefix="/api")
+
+
+class _AIRecommendation(BaseModel):
+    repo: str
+    reason: str = ""
+    score: float = Field(default=0, ge=0, le=100, allow_inf_nan=False)
 
 
 def _one_day_ago():
@@ -39,6 +49,7 @@ def _build_project_dict(r, fav_ids):
         "score": r["score"],
         "last_updated": r["last_updated"],
         "fetched_at": r["fetched_at"],
+        "first_seen_at": first_seen,
         "is_favorited": r["id"] in fav_ids,
         "is_new": is_new,
     }
@@ -50,6 +61,7 @@ def list_projects(
     language: str = Query(None),
     sort: str = Query("score"),
     q: str = Query(None),
+    min_stars: int = Query(0, ge=0),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -58,29 +70,18 @@ def list_projects(
     # Load favorite IDs
     fav_ids = {r["project_id"] for r in conn.execute("SELECT project_id FROM favorites").fetchall()}
 
-    conditions = []
-    params = []
-
-    if category:
-        conditions.append("category = ?")
-        params.append(category)
-    if language:
-        conditions.append("language = ?")
-        params.append(language)
-    if q:
-        conditions.append("(repo_full_name LIKE ? OR description LIKE ? OR description_zh LIKE ?)")
-        like = f"%{q}%"
-        params.extend([like, like, like])
-
-    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    where, params = build_project_filters(
+        category=category, language=language, q=q, min_stars=min_stars,
+    )
 
     sort_map = {
         "score": "score DESC",
         "stars": "stars DESC",
         "stars_gained": "stars_gained DESC",
         "updated": "last_updated DESC",
+        "newest": "first_seen_at DESC",
     }
-    order = sort_map.get(sort, "score DESC")
+    order = sort_map.get(sort, "score DESC") + ", id DESC"
 
     offset = (page - 1) * page_size
 
@@ -167,7 +168,11 @@ def get_star_history_batch(ids: str = Query(...), points: int = Query(30, ge=2, 
 @router.get("/search/github")
 async def search_github(q: str = Query(..., min_length=1)):
     """Search GitHub directly and return results."""
-    results = await fetch_search_results(keyword=q)
+    try:
+        results = await fetch_search_results(keyword=q)
+    except (GitHubRequestError, httpx.RequestError) as exc:
+        logging.getLogger("search").warning("GitHub search failed: %s", exc)
+        raise HTTPException(status_code=502, detail="GitHub search is temporarily unavailable") from exc
     items = []
     for p in results:
         items.append({
@@ -253,6 +258,7 @@ async def get_recommendations(force: bool = Query(False)):
     all_projects = conn.execute(
         "SELECT id, repo_full_name, topics, language, description, description_zh FROM projects"
     ).fetchall()
+    conn.close()
 
     scored = []
     for p in all_projects:
@@ -269,7 +275,6 @@ async def get_recommendations(force: bool = Query(False)):
     candidates = scored[:20]
 
     if not candidates:
-        conn.close()
         return {"items": [], "message": "no_matches"}
 
     # Phase 2: AI re-ranking
@@ -287,7 +292,7 @@ async def get_recommendations(force: bool = Query(False)):
 以下是候选推荐项目:
 {candidate_text}
 
-请从中选出最值得推荐的10个项目，按推荐度排序。对每个项目用一句简短的中文说明为什么推荐（结合用户兴趣）。
+请从中选出最值得推荐的10个项目，按推荐度排序，score 为 0 到 100 之间的数值。对每个项目用一句简短的中文说明为什么推荐（结合用户兴趣）。
 返回 JSON 对象，格式: {{"recommendations": [{{"repo":"owner/name","reason":"推荐理由","score":95}}]}}
 只返回JSON，不要其他内容。"""
 
@@ -310,39 +315,46 @@ async def get_recommendations(force: bool = Query(False)):
     except Exception:
         logging.getLogger("recommendations").warning("AI re-ranking failed; using tag-based fallback", exc_info=True)
 
-    # Save to DB
-    conn.execute("DELETE FROM recommendations")
+    # Validate model output before replacing the cache. Only real, unique candidates count.
     repo_to_id = {c[0]["repo_full_name"]: c[0]["id"] for c in candidates}
+    recommendation_rows = []
+    seen_ids = set()
+    for raw in recommendations:
+        try:
+            rec = _AIRecommendation.model_validate(raw)
+        except ValidationError:
+            continue
+        pid = repo_to_id.get(rec.repo)
+        if pid is None or pid in seen_ids:
+            continue
+        seen_ids.add(pid)
+        recommendation_rows.append((pid, rec.reason, rec.score, now))
+        if len(recommendation_rows) == 10:
+            break
 
-    if recommendations:
-        for rec in recommendations[:10]:
-            repo = rec.get("repo", "")
-            pid = repo_to_id.get(repo)
-            if pid:
-                conn.execute(
-                    "INSERT INTO recommendations (project_id, reason, score, generated_at) VALUES (?, ?, ?, ?)",
-                    (pid, rec.get("reason", ""), rec.get("score", 0), now)
-                )
-    else:
+    if not recommendation_rows:
         # Fallback: use tag-scored candidates without AI reason
         for c, s in candidates[:10]:
-            conn.execute(
-                "INSERT INTO recommendations (project_id, reason, score, generated_at) VALUES (?, ?, ?, ?)",
-                (c["id"], "基于相似标签和语言推荐", s * 10, now)
-            )
+            recommendation_rows.append((c["id"], "基于相似标签和语言推荐", s * 10, now))
 
-    conn.commit()
+    with closing(get_connection()) as conn:
+        with conn:
+            conn.execute("DELETE FROM recommendations")
+            conn.executemany(
+                "INSERT INTO recommendations (project_id, reason, score, generated_at) VALUES (?, ?, ?, ?)",
+                recommendation_rows,
+            )
+        rows = conn.execute(
+            "SELECT r.project_id, r.reason, r.score, p.* FROM recommendations r "
+            "JOIN projects p ON r.project_id = p.id ORDER BY r.score DESC LIMIT 10"
+        ).fetchall()
+
     set_runtime_state(
         recommendation_fav_hash=fav_hash,
         recommendation_generated_at=now,
     )
 
     # Return results
-    rows = conn.execute(
-        "SELECT r.project_id, r.reason, r.score, p.* FROM recommendations r "
-        "JOIN projects p ON r.project_id = p.id ORDER BY r.score DESC LIMIT 10"
-    ).fetchall()
-    conn.close()
     items = []
     for r in rows:
         d = _build_project_dict(r, fav_ids)

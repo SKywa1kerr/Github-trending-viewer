@@ -2,6 +2,7 @@ import json
 import asyncio
 import re
 import time
+from urllib.parse import urlencode
 from bs4 import BeautifulSoup
 from app.config import config
 from app.database import get_connection
@@ -13,10 +14,10 @@ def build_search_url(topic: str = None, keyword: str = None, sort: str = "stars"
     if topic:
         q = f"topic:{topic}"
     elif keyword:
-        q = keyword.replace(" ", "+")
+        q = keyword
     else:
         q = "stars:>100"
-    return f"{base}?q={q}&sort={sort}&per_page=30"
+    return f"{base}?{urlencode({'q': q, 'sort': sort, 'per_page': 30})}"
 
 
 def parse_trending_html(html: str) -> list[dict]:
@@ -53,19 +54,13 @@ def parse_trending_html(html: str) -> list[dict]:
 async def fetch_trending(period: str = "daily") -> list[dict]:
     period_map = {"daily": "", "weekly": "?since=weekly", "monthly": "?since=monthly"}
     url = f"https://github.com/trending{period_map.get(period, '')}"
-    try:
-        html = await github_get_text(url)
-    except GitHubRequestError:
-        return []
+    html = await github_get_text(url)
     return parse_trending_html(html)
 
 
 async def fetch_search_results(topic: str = None, keyword: str = None) -> list[dict]:
     url = build_search_url(topic=topic, keyword=keyword)
-    try:
-        data = await github_get_json(url)
-    except GitHubRequestError:
-        return []
+    data = await github_get_json(url)
     repos = []
     for item in data.get("items", [])[:30]:
         repos.append({
@@ -96,7 +91,7 @@ def save_projects(projects: list[dict], category: str):
     conn = get_connection()
     today = time.strftime("%Y-%m-%d")
     for p in projects:
-        topics_json = json.dumps(p.get("topics", []))
+        topics_json = json.dumps(p.get("topics") or [])
         conn.execute("""
             INSERT INTO projects (repo_full_name, description, stars, stars_gained,
                                   language, topics, category, repo_url, last_updated,
@@ -108,8 +103,8 @@ def save_projects(projects: list[dict], category: str):
                 stars_gained = CASE WHEN excluded.stars_gained > 0
                                THEN excluded.stars_gained ELSE stars_gained END,
                 language = excluded.language,
-                topics = excluded.topics,
-                last_updated = excluded.last_updated,
+                topics = CASE WHEN ? THEN excluded.topics ELSE projects.topics END,
+                last_updated = COALESCE(NULLIF(excluded.last_updated, ''), projects.last_updated),
                 fetched_at = datetime('now'),
                 translation_status = CASE
                     WHEN projects.description != excluded.description
@@ -130,7 +125,7 @@ def save_projects(projects: list[dict], category: str):
                 END
         """, (p["repo_full_name"], p["description"], p["stars"], p["stars_gained"],
               p["language"], topics_json, category, p["repo_url"],
-              p.get("last_updated", "")))
+              p.get("last_updated") or "", p.get("topics") is not None))
         # Record star history
         if p["stars"] > 0:
             row = conn.execute(
@@ -150,12 +145,8 @@ def save_projects(projects: list[dict], category: str):
 async def fetch_repo_topics(repo_full_name: str) -> list[str]:
     """通过 GitHub API 获取仓库的 topics（Trending 页面不含 topics 信息）"""
     url = f"https://api.github.com/repos/{repo_full_name}/topics"
-    try:
-        data = await github_get_json(url, accept="application/vnd.github.mercy-preview+json")
-        return data.get("names", [])
-    except GitHubRequestError:
-        pass
-    return []
+    data = await github_get_json(url, accept="application/vnd.github.mercy-preview+json")
+    return data.get("names", [])
 
 
 async def run_full_scrape():
@@ -165,7 +156,13 @@ async def run_full_scrape():
 
     # 1. Trending（每日）
     set_progress("scraping", 4, 1, "获取 Trending 列表...")
-    trending = await fetch_trending("daily")
+    successful_sources = 0
+    try:
+        trending = await fetch_trending("daily")
+        successful_sources += 1
+    except Exception as exc:
+        trending = []
+        logger.warning("Failed to fetch Trending: %s", exc)
     logger.info(f"Fetched {len(trending)} trending repos")
 
     # 并发获取 topics（提高到 10 并发）
@@ -176,8 +173,9 @@ async def run_full_scrape():
         async with sem:
             try:
                 p["topics"] = await fetch_repo_topics(p["repo_full_name"])
-            except Exception:
-                p["topics"] = []
+            except Exception as exc:
+                # Missing metadata is unknown, not an authoritative empty tag list.
+                logger.warning("Failed to fetch topics for %s: %s", p["repo_full_name"], exc)
 
     await asyncio.gather(*[_fetch_topics_for(p) for p in trending])
     save_projects(trending, "other")
@@ -199,6 +197,7 @@ async def run_full_scrape():
     done_count = [0]
 
     async def _search_one(task_type, category, query):
+        nonlocal successful_sources
         async with search_sem:
             try:
                 if task_type == "topic":
@@ -206,6 +205,7 @@ async def run_full_scrape():
                 else:
                     results = await fetch_search_results(keyword=query)
                 save_projects(results, category)
+                successful_sources += 1
                 logger.info(f"Fetched {len(results)} repos for {task_type}:{query}")
             except Exception as e:
                 logger.warning(f"Failed {task_type} {query}: {e}")
@@ -213,6 +213,9 @@ async def run_full_scrape():
             set_progress("scraping", 4, 2, f"搜索进度 {done_count[0]}/{len(all_tasks)}")
 
     await asyncio.gather(*[_search_one(t, c, q) for t, c, q in all_tasks])
+
+    if not successful_sources:
+        raise RuntimeError("All GitHub project sources failed to refresh; check the connection and API rate limits")
 
     # 3. 重新分类
     set_progress("scraping", 4, 3, "重新分类项目...")

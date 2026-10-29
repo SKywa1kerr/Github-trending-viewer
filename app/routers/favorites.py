@@ -1,6 +1,7 @@
 import json
 from fastapi import APIRouter, HTTPException, Query
 from app.database import get_connection
+from app.project_filters import build_project_filters
 
 router = APIRouter(prefix="/api")
 
@@ -16,6 +17,9 @@ def get_favorite_ids():
 @router.get("/favorites")
 def list_favorites(
     sort: str = Query("score"),
+    language: str = Query(None),
+    q: str = Query(None),
+    min_stars: int = Query(0, ge=0),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -26,19 +30,23 @@ def list_favorites(
         "stars_gained": "p.stars_gained DESC",
         "updated": "p.last_updated DESC",
         "favorited": "f.created_at DESC",
+        "newest": "p.first_seen_at DESC",
     }
-    order = sort_map.get(sort, "f.created_at DESC")
+    order = sort_map.get(sort, "f.created_at DESC") + ", p.id DESC"
     offset = (page - 1) * page_size
+    where, params = build_project_filters(language=language, q=q, min_stars=min_stars, prefix="p.")
 
     total = conn.execute(
-        "SELECT COUNT(*) FROM favorites f JOIN projects p ON f.project_id = p.id"
+        f"SELECT COUNT(*) FROM favorites f JOIN projects p ON f.project_id = p.id {where}",
+        params,
     ).fetchone()[0]
 
     rows = conn.execute(
         f"SELECT p.*, f.created_at AS favorited_at FROM projects p "
         f"JOIN favorites f ON f.project_id = p.id "
+        f"{where} "
         f"ORDER BY {order} LIMIT ? OFFSET ?",
-        (page_size, offset)
+        [*params, page_size, offset],
     ).fetchall()
 
     items = []
@@ -64,6 +72,7 @@ def list_favorites(
             "score": r["score"],
             "last_updated": r["last_updated"],
             "fetched_at": r["fetched_at"],
+            "first_seen_at": r["first_seen_at"],
             "is_favorited": True,
             "is_new": is_new,
         })

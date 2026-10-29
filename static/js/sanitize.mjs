@@ -33,23 +33,34 @@ export function formatReadmeHtml(text) {
   normalized = normalized.replace(/(^|\n)[\u2022\u00b7]\s*/g, '$1- ');
   normalized = normalized.replace(/\n{3,}/g, '\n\n').trim();
 
-  const lines = normalized.split('\n').filter((line) => line.trim());
+  const lines = normalized.split('\n').map(line => line.trim()).filter(Boolean);
   let html = '';
 
   for (const line of lines) {
+    const heading = line.match(/^#{1,6}\s+(.+)/);
+    if (heading) {
+      html += '<h3 class="readme-heading">' + formatReadmeInline(heading[1]) + '</h3>';
+      continue;
+    }
     const numbered = line.match(/^(\d+)\.\s*(.+)/);
     if (numbered) {
-      html += `<div class="readme-point"><span class="readme-point-num">${escapeHtml(numbered[1])}</span><span class="readme-point-text">${escapeHtml(numbered[2].trim())}</span></div>`;
+      html += `<div class="readme-point"><span class="readme-point-num">${escapeHtml(numbered[1])}</span><span class="readme-point-text">${formatReadmeInline(numbered[2].trim())}</span></div>`;
       continue;
     }
 
-    if (line.startsWith('- ')) {
-      html += `<div class="readme-point"><span class="readme-point-num">•</span><span class="readme-point-text">${escapeHtml(line.slice(2).trim())}</span></div>`;
+    if (/^[-*]\s/.test(line)) {
+      html += `<div class="readme-point"><span class="readme-point-num">•</span><span class="readme-point-text">${formatReadmeInline(line.slice(2).trim())}</span></div>`;
       continue;
     }
 
-    html += `<div class="readme-intro">${escapeHtml(line.trim())}</div>`;
+    html += `<p class="readme-intro">${formatReadmeInline(line)}</p>`;
   }
 
   return html;
+}
+
+// Only local emphasis and inline code are introduced after HTML is escaped.
+function formatReadmeInline(text) {
+  return escapeHtml(text).replace(/`([^`]+)`|\*\*([^*]+)\*\*/g,
+    (_, code, strong) => code !== undefined ? '<code>' + code + '</code>' : '<strong>' + strong + '</strong>');
 }
