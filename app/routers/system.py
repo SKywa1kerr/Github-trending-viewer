@@ -196,7 +196,22 @@ def get_health():
         "model": config.API_MODEL,
     }
     if not api_key_ok:
-        problems.append("API_KEY is not configured")
+        problems.append("Remote AI features are not configured" if config.TRANSLATION_PROVIDER == "ollama"
+                        else "API_KEY is not configured")
+
+    if config.TRANSLATION_PROVIDER == "ollama":
+        from app.translation_provider import check_local_translation
+
+        checks["translation"] = check_local_translation()
+        if not checks["translation"]["ok"]:
+            problems.append(checks["translation"]["detail"])
+    else:
+        checks["translation"] = {
+            "ok": api_key_ok and config.TRANSLATION_PROVIDER == "openai-compatible",
+            "provider": config.TRANSLATION_PROVIDER,
+            "model": config.TRANSLATION_MODEL, "local": False,
+            "detail": "使用远程模型服务",
+        }
 
     checks["model_available"] = _check_model_available(config, api_key_ok)
     if not checks["model_available"]["ok"]:

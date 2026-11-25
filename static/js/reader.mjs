@@ -1,6 +1,6 @@
-import { escapeHtml, formatReadmeHtml } from './sanitize.mjs?v=42';
-import { categoryNames, formatStars, timeAgo } from './library.mjs?v=40';
-import { normalizeProjectCategory, projectIdentity } from './cards.mjs?v=42';
+import { escapeHtml, formatReadmeHtml } from './sanitize.mjs?v=75';
+import { categoryNames, formatStars, timeAgo } from './library.mjs?v=75';
+import { normalizeProjectCategory, projectIdentity } from './cards.mjs?v=75';
 
 export function estimateReadingMinutes(value) {
     const text = String(value || '').trim();

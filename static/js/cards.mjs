@@ -1,5 +1,5 @@
-import { escapeHtml, formatReadmeHtml, safeExternalUrl } from './sanitize.mjs?v=42';
-import { buildProjectDescription, categoryNames, icon, readmeHighlights, renderProjectMeta, timeAgo } from './library.mjs?v=40';
+import { escapeHtml, formatReadmeHtml, safeExternalUrl } from './sanitize.mjs?v=75';
+import { buildProjectDescription, categoryNames, icon, readmeHighlights, renderProjectMeta, timeAgo } from './library.mjs?v=75';
 
 const failedAvatarUrls = new Set();
 
@@ -66,7 +66,7 @@ export function hasDiscoverySpotlight({ category = 'all', query = '', language =
         && !favoritesMode && !recommendMode && !githubSearch;
 }
 
-export function renderProjectCardContents(project, { featured = false, expanded = false } = {}) {
+export function renderProjectCardContents(project, { featured = false, expanded = false, rank = 0 } = {}) {
     const fullName = String(project.repo_full_name || '');
     const { owner, name, monogram } = projectIdentity(fullName);
     const summary = formatReadmeHtml(project.readme_summary_zh || '');
@@ -86,6 +86,7 @@ export function renderProjectCardContents(project, { featured = false, expanded 
     const readmeLabel = summary ? '展开摘要' : project.translation_status === 'failed' ? '摘要生成失败' : '暂无中文摘要';
     const url = escapeHtml(safeExternalUrl(project.repo_url));
     return [
+        featured ? '<div class="spotlight-heading"><span>' + icon('book') + '今日首推</span><span>综合评分 No.1</span></div>' : '',
         '<div class="project-story">',
         '<div class="card-header"><div class="project-identity">',
         '<span class="project-mark" data-tone="' + tone + '" aria-hidden="true"><span class="project-monogram">' + escapeHtml(monogram) + '</span>',
@@ -96,13 +97,14 @@ export function renderProjectCardContents(project, { featured = false, expanded 
         '<span class="repo-category">' + escapeHtml(categoryLabel) + '</span>',
         project.is_new ? '<span class="badge-new">新收录</span>' : '',
         '</div></div></div><div class="card-actions">',
+        rank > 0 && !featured ? '<span class="card-rank" aria-hidden="true">' + String(rank).padStart(2, '0') + '</span>' : '',
         '<button type="button" class="icon-button btn-favorite' + (project.is_favorited ? ' favorited' : '') + '" data-action="favorite" aria-pressed="' + Boolean(project.is_favorited) + '" title="' + (project.is_favorited ? '取消收藏' : '收藏项目') + '" aria-label="' + (project.is_favorited ? '取消收藏 ' : '收藏 ') + escapeHtml(fullName) + '">' + icon('bookmark') + '</button></div></div>',
         '<p class="card-description" title="' + escapeHtml(description) + '">' + escapeHtml(description) + '</p>',
         renderProjectMeta(project),
         '<div class="card-tags">' + tags + '</div>',
         project.recommendation_reason ? '<div class="rec-reason">' + icon('sparkles') + '<span>' + escapeHtml(project.recommendation_reason) + '</span></div>' : '',
         '</div>',
-        highlights.length ? '<aside class="project-highlights" aria-label="' + escapeHtml(name) + ' 项目速览"><h3>项目速览</h3><ul>' + highlights.map(point => '<li>' + escapeHtml(point) + '</li>').join('') + '</ul></aside>' : '',
+        highlights.length ? '<aside class="project-highlights" aria-label="' + escapeHtml(name) + ' 项目速览"><h3>README 要点</h3><ul>' + highlights.map(point => '<li>' + escapeHtml(point) + '</li>').join('') + '</ul></aside>' : '',
         '<div class="card-footer"><div class="card-footer-actions">',
         '<button class="card-read" type="button" data-action="reader" aria-haspopup="dialog" aria-controls="reader-modal" aria-label="阅读 ' + escapeHtml(fullName) + '">' + icon('book') + '<span>阅读项目</span></button>',
         '<button class="readme-toggle" type="button" data-action="readme" aria-expanded="' + isExpanded + '" aria-controls="' + escapeHtml(readmeId) + '"' + (summary ? '' : ' disabled') + '><span class="readme-label">' + (isExpanded ? '收起摘要' : readmeLabel) + '</span>' + (summary ? icon('chevron') : '') + '</button>',

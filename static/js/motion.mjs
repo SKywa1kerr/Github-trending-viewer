@@ -3,6 +3,15 @@ const engine = () => globalThis.gsap;
 const reduced = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 const closing = new WeakSet();
 
+export function showNavigationMotion(content) {
+    const gsap = engine();
+    if (!gsap || reduced()) return;
+    gsap.fromTo(content, { x: -10, autoAlpha: .8 }, {
+        x: 0, autoAlpha: 1, duration: .2, ease: 'power2.out',
+        clearProps: 'transform,opacity,visibility', overwrite: true,
+    });
+}
+
 export function showDialogMotion(dialog) {
     const gsap = engine();
     if (!gsap || reduced()) return;
