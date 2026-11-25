@@ -16,6 +16,10 @@ class Config:
     AI_MODEL_CHECK: bool = os.getenv("AI_MODEL_CHECK", "1").strip().lower() not in ("0", "false", "no", "")
     TRANSLATION_PROVIDER: str = os.getenv("TRANSLATION_PROVIDER", "openai-compatible")
     TRANSLATION_MODEL: str = os.getenv("TRANSLATION_MODEL", API_MODEL)
+    # Native Ollama runs independently of the remote AI endpoint and its proxy/budget.
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen3:8b")
+    OLLAMA_TIMEOUT_SECONDS: int = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "180"))
     TRANSLATION_TIMEOUT_SECONDS: int = int(os.getenv("TRANSLATION_TIMEOUT_SECONDS", "60"))
     TRANSLATION_CONCURRENCY: int = int(os.getenv("TRANSLATION_CONCURRENCY", "2"))
     TRANSLATION_BATCH_SIZE: int = int(os.getenv("TRANSLATION_BATCH_SIZE", "8"))

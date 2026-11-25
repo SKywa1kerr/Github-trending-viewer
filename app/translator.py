@@ -8,7 +8,7 @@ from app.ai_client import extract_json_object, extract_message_content
 from app.config import config
 from app.database import get_connection
 from app.state_store import get_runtime_value, set_runtime_state
-from app.translation_provider import build_translation_provider
+from app.translation_provider import build_translation_provider, translation_model
 
 
 logger = logging.getLogger("translator")
@@ -119,18 +119,21 @@ async def fetch_readme_for_translation(repo_full_name: str) -> str:
 
 
 async def translate_project(repo_name: str, description: str, readme: str) -> dict:
-    if _get_daily_tokens_used() >= config.MAX_DAILY_TOKENS:
+    provider = build_translation_provider()
+    is_local = getattr(provider, "is_local", False)
+    if not is_local and _get_daily_tokens_used() >= config.MAX_DAILY_TOKENS:
         raise TranslationRetryableError("daily token budget reached")
 
     prompt = build_translate_prompt(repo_name, description, readme)
-    provider = build_translation_provider()
 
     try:
-        await _wait_for_translation_rate_limit()
+        if not is_local:
+            await _wait_for_translation_rate_limit()
         data = await provider.translate(prompt)
         content = extract_message_content(data)
         usage = data.get("usage", {})
-        _add_daily_tokens_used(usage.get("total_tokens", 0))
+        if not is_local:
+            _add_daily_tokens_used(usage.get("total_tokens", 0))
     except Exception as exc:
         raise TranslationRetryableError(str(exc)) from exc
 
@@ -263,7 +266,7 @@ async def translate_project_row(row) -> bool:
         translation_error="",
         translated_signature=signature,
         translation_provider=config.TRANSLATION_PROVIDER,
-        translation_model=config.TRANSLATION_MODEL,
+        translation_model=translation_model(),
     )
     return True
 
@@ -273,7 +276,9 @@ async def process_translation_queue(limit: int | None = None) -> int:
     if not rows:
         return 0
 
-    semaphore = asyncio.Semaphore(config.TRANSLATION_CONCURRENCY)
+    # A single local request avoids concurrent model contexts exhausting laptop VRAM.
+    concurrency = 1 if config.TRANSLATION_PROVIDER == "ollama" else config.TRANSLATION_CONCURRENCY
+    semaphore = asyncio.Semaphore(max(1, concurrency))
 
     async def _run(row):
         async with semaphore:
