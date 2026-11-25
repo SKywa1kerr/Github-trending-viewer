@@ -1,17 +1,18 @@
-import { escapeHtml, formatChatText, safeExternalUrl } from './sanitize.mjs?v=42';
-import { hasDiscoverySpotlight, hydrateProjectAvatars, normalizeProjectCategory, renderProjectCardContents } from './cards.mjs?v=42';
-import { renderProjectReading } from './reader.mjs?v=42';
-import { bindMotionFeedback, showDialogMotion, closeDialogMotion } from './motion.mjs?v=60';
+import { escapeHtml, formatChatText, safeExternalUrl } from './sanitize.mjs?v=75';
+import { hasDiscoverySpotlight, hydrateProjectAvatars, normalizeProjectCategory, renderProjectCardContents } from './cards.mjs?v=75';
+import { renderProjectReading } from './reader.mjs?v=75';
+import { bindMotionFeedback, showDialogMotion, closeDialogMotion, showNavigationMotion } from './motion.mjs?v=75';
 import {
     categoryNames, icon, formatStars, buildModeState, buildResultContext,
     formatTranslationSummary, renderSparkline, timeAgo, readmeHighlights,
     parseProjectDate, filterProjectItems, createRequestGate, streamChatText,
-} from './library.mjs?v=40';
+    readViewState, buildViewSearch,
+} from './library.mjs?v=75';
 
 export {
     buildModeState, buildResultContext, emptyStateMessage, formatTranslationSummary,
     renderProjectMeta, buildSparklinePoints, sparklineTrend, renderSparkline,
-} from './library.mjs?v=40';
+} from './library.mjs?v=75';
 
 function preference(key, fallback, allowed) {
     try {
@@ -31,8 +32,8 @@ const state = {
     favoriteIds: new Set(), languages: [], remoteQuery: '', remoteItems: null,
     recommendations: null, recommendationMessage: '', hadError: false,
     view: preference('project-view', 'grid', ['grid', 'list']),
-    theme: preference('theme', 'system', ['system', 'light', 'dark']),
-    accent: preference('accent', 'indigo', ['indigo', 'teal', 'amber', 'rose']),
+    theme: preference('theme', 'dark', ['system', 'light', 'dark']),
+    accent: preference('accent', 'indigo', ['vermilion', 'indigo', 'teal', 'amber', 'rose']),
 };
 const requests = createRequestGate();
 const expandedProjects = new Set();
@@ -61,7 +62,9 @@ async function api(path, options = {}) {
 async function init() {
     applyTheme();
     applyView();
+    $('dateline').textContent = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
     bindEvents();
+    applyViewFromAddress();
     updateModeUI();
     $('loading-screen').classList.add('hidden');
     $('main-content').classList.remove('hidden');
@@ -76,6 +79,22 @@ async function init() {
     }, { once: true });
 }
 
+// The address is the source of truth on load and on back/forward; every list load writes it back.
+function applyViewFromAddress() {
+    const view = readViewState(location.search);
+    Object.assign(state, buildModeState(view.category), {
+        githubSearch: view.githubSearch, query: view.query, language: view.language,
+        minStars: view.minStars, sort: view.sort, items: [], total: 0,
+    });
+    $('search-input').value = view.query;
+}
+
+function syncAddress(push = false) {
+    const search = buildViewSearch({ ...state, category: currentCategory() });
+    if (search === location.search) return;
+    try { history[push ? 'pushState' : 'replaceState'](null, '', location.pathname + search); } catch { /* History may be unavailable. */ }
+}
+
 function currentCategory() {
     return state.favoritesMode ? 'favorites' : state.recommendMode ? 'recommend' : state.category;
 }
@@ -84,7 +103,7 @@ function updateModeUI() {
     const category = currentCategory();
     const title = state.githubSearch ? 'GitHub 搜索' : categoryNames[category];
     const descriptions = {
-        all: '从开源项目，到你的下一个灵感。',
+        all: '值得读、值得用的开源项目。',
         ai: '探索模型、智能体与机器学习工具。',
         tools: '让日常工作更轻松的开源工具。',
         devtools: '框架、命令行与开发基础设施。',
@@ -93,12 +112,21 @@ function updateModeUI() {
         recommend: '根据你的收藏，发现可能喜欢的项目。',
     };
     $('page-title').textContent = title;
-    $('page-subtitle').textContent = state.githubSearch ? '搜索 GitHub 上的公开项目。' : descriptions[category];
+    $('workspace-location-label').textContent = title;
+    // Each phrase wraps as a unit, so the large headline never breaks in the middle of one.
+    const subtitle = state.githubSearch ? '搜索 GitHub 上的公开项目。' : descriptions[category];
+    $('page-subtitle').replaceChildren(...(subtitle.match(/[^、，。]+[、，。]?/g) || [subtitle]).map(phrase => {
+        const part = document.createElement('span');
+        part.className = 'phrase';
+        part.textContent = phrase;
+        return part;
+    }));
     document.title = title + ' · GitHub Trending';
     const discovery = !state.favoritesMode && !state.recommendMode && !state.githubSearch;
     $('category-navigation').classList.toggle('hidden', !discovery);
+    $('category-group').classList.toggle('hidden', !discovery);
     document.querySelectorAll('.tab[data-category]').forEach(tab => {
-        const active = tab.dataset.mode === 'discover' ? discovery : !state.githubSearch && tab.dataset.category === category;
+        const active = !state.githubSearch && tab.dataset.category === category;
         tab.classList.toggle('active', active);
         if (active) tab.setAttribute('aria-current', 'page');
         else tab.removeAttribute('aria-current');
@@ -124,10 +152,16 @@ function updateModeUI() {
     $('filter-sort').value = state.sort;
     $('filter-stars').value = String(state.minStars);
     $('btn-shuffle-rec').classList.toggle('hidden', !state.recommendMode || state.githubSearch);
+    updateCompositionFocus();
     updateFilterUI();
 }
 
 function updateFilterUI() {
+    $('filter-sort').value = state.sort;
+    document.querySelectorAll('[data-sort]').forEach(button => {
+        button.setAttribute('aria-pressed', String(button.dataset.sort === state.sort));
+        button.disabled = state.githubSearch && button.dataset.sort === 'newest';
+    });
     $('btn-clear-search').classList.toggle('hidden', !$('search-input').value);
     $('search-shortcut').classList.toggle('hidden', Boolean($('search-input').value));
     const filters = [];
@@ -159,11 +193,17 @@ function updateResultUI() {
         ? (state.query ? '“' + state.query + '”' : '搜索 GitHub')
         : state.favoritesMode ? '收藏的项目'
         : state.recommendMode ? '为你精选'
-        : state.query || state.language || state.minStars ? '筛选结果' : '全部项目';
+        : state.query || state.language || state.minStars ? '筛选结果'
+        : state.category === 'all' ? '全部项目' : categoryNames[state.category];
     $('result-context-detail').textContent = state.loading ? '正在加载…'
         : state.githubSearch && !state.query ? '输入关键词后搜索'
         : state.total.toLocaleString('zh-CN') + (state.githubSearch ? ' 个结果' : ' 个项目');
     $('result-context').dataset.tone = context.tone;
+    const orderNotes = { score: '按综合评分排序', stars: '按 Star 总数排序',
+        stars_gained: '按最近抓取的 Star 增长排序', updated: '按仓库更新时间排序',
+        newest: '按项目库收录时间排序', favorited: '按收藏时间排序' };
+    $('result-order-note').textContent = orderNotes[state.sort] || '';
+    $('result-order-note').classList.toggle('hidden', state.recommendMode || state.githubSearch);
     updateFilterUI();
 }
 
@@ -177,9 +217,11 @@ function setLoading(loading) {
 }
 
 function renderSkeletons() {
-    $('project-list').innerHTML = Array.from({ length: 4 }, () =>
-        '<div class="project-card skeleton-card" aria-hidden="true">' +
-        '<div class="skeleton-line"></div>'.repeat(6) + '</div>').join('');
+    const lead = hasDiscoverySpotlight(state);
+    $('project-list').innerHTML = Array.from({ length: lead ? 7 : 6 }, (_, index) =>
+        '<div class="project-card skeleton-card' + (lead && index === 0 ? ' skeleton-lead' : '') + '" aria-hidden="true">' +
+        '<div class="skeleton-head"><span class="skeleton-mark"></span><span class="skeleton-line"></span></div>' +
+        '<div class="skeleton-line"></div>'.repeat(4) + '</div>').join('');
 }
 
 async function loadProjects(append = false, { force = false } = {}) {
@@ -187,6 +229,7 @@ async function loadProjects(append = false, { force = false } = {}) {
     const request = requests.start();
     const snapshot = { ...state };
     const page = append ? state.page + 1 : 1;
+    if (!append) syncAddress();
     setLoading(true);
     state.hadError = false;
     $('empty-state').classList.add('hidden');
@@ -256,12 +299,13 @@ function renderCards(items, append = false) {
     const list = $('project-list');
     if (!append) list.replaceChildren();
     const spotlight = !append && hasDiscoverySpotlight(state);
-    const cards = items.map((project, index) => renderCard(project, spotlight && index === 0));
+    const offset = append ? state.items.length - items.length : 0;
+    const cards = items.map((project, index) => renderCard(project, spotlight && index === 0, offset + index + 1, index));
     list.append(...cards);
     hydrateSparklines(cards);
 }
 
-function renderCard(project, featured = false) {
+function renderCard(project, featured = false, rank = 0, order = 0) {
     const card = document.createElement('article');
     card.className = 'project-card';
     card.classList.toggle('is-featured', featured);
@@ -270,8 +314,9 @@ function renderCard(project, featured = false) {
     card.dataset.id = String(project.id || 0);
     card.dataset.category = normalizeProjectCategory(project.category);
     card.setAttribute('aria-labelledby', 'project-title-' + encodeURIComponent(project.repo_full_name || ''));
+    card.style.setProperty('--i', String(Math.min(order, 8)));
     card.innerHTML = renderProjectCardContents(project, {
-        featured, expanded: expandedProjects.has(project.repo_full_name),
+        featured, rank, expanded: expandedProjects.has(project.repo_full_name),
     });
     hydrateProjectAvatars(card);
     return card;
@@ -360,6 +405,7 @@ function selectCategory(category) {
     state.total = 0;
     updateModeUI();
     closeNavigation();
+    syncAddress(true);
     loadProjects();
     window.scrollTo({ top: 0, behavior: 'instant' });
 }
@@ -371,6 +417,7 @@ function selectSource(source) {
     state.items = [];
     state.total = 0;
     updateModeUI();
+    syncAddress(true);
     loadProjects();
 }
 
@@ -420,11 +467,29 @@ async function toggleFavorite(project, button) {
         state.recommendations = null;
         updateFavoriteButton(button, project);
         updateFavoriteCount();
-        showToast(project.is_favorited ? '已加入收藏' : '已取消收藏', 'success');
+        if (project.is_favorited) showToast('已加入收藏', 'success');
+        else showToast('已取消收藏', 'success', { label: '撤销', run: () => restoreFavorite(project) });
         if (state.favoritesMode && !state.githubSearch && !project.is_favorited) await loadProjects();
     } catch {
         showToast('收藏未能保存，请重试。', 'error');
     } finally { button.disabled = false; }
+}
+
+// Removing a favorite is one tap, so the confirmation carries its own way back.
+async function restoreFavorite(project) {
+    const id = Number(project.id || 0);
+    try {
+        try { await api('/favorites/' + id, { method: 'POST' }); }
+        catch (error) { if (error.status !== 409) throw error; }
+        project.is_favorited = true;
+        state.favoriteIds.add(id);
+        state.recommendations = null;
+        updateFavoriteCount();
+        if (state.favoritesMode && !state.githubSearch) { await loadProjects(); return; }
+        const card = [...document.querySelectorAll('.project-card')].find(item => item.dataset.repo === project.repo_full_name);
+        const button = card?.querySelector('.btn-favorite');
+        if (button) updateFavoriteButton(button, project);
+    } catch { showToast('未能恢复收藏，请重试。', 'error'); }
 }
 
 function updateFavoriteButton(button, project) {
@@ -437,6 +502,8 @@ function updateFavoriteButton(button, project) {
 function updateFavoriteCount() {
     const count = document.querySelector('[data-count="favorites"]');
     count.textContent = String(state.favoriteIds.size);
+    $('pulse-favorites').textContent = state.favoriteIds.size.toLocaleString('zh-CN');
+    $('btn-pulse-favorites').setAttribute('aria-label', '查看 ' + state.favoriteIds.size + ' 个收藏的项目');
 }
 
 async function loadNavigation() {
@@ -449,11 +516,38 @@ async function loadNavigation() {
             if (count) count.textContent = String(category.count);
         });
         document.querySelector('[data-count="all"]').textContent = String(total);
+        renderComposition(results[0].value, total);
     }
     if (results[1].status === 'fulfilled') {
         state.favoriteIds = new Set(results[1].value);
         updateFavoriteCount();
     }
+}
+
+// Part-to-whole figure: the legend buttons carry names and counts, so color is never the only cue.
+function renderComposition(categories, total) {
+    const parts = ['ai', 'tools', 'devtools', 'other']
+        .map(key => ({ key, count: Number(categories.find(category => category.key === key)?.count || 0) }))
+        .filter(part => part.count > 0);
+    const root = $('pulse-composition');
+    if (!total || !parts.length) { root.replaceChildren(); return; }
+    const share = count => Math.round(count / total * 100) + '%';
+    const summary = parts.map(part => categoryNames[part.key] + ' ' + part.count + ' 个（' + share(part.count) + '）').join('，');
+    root.innerHTML = '<div class="composition-bar" role="img" aria-label="' + escapeHtml('分类构成：' + summary) + '">'
+        + parts.map(part => '<span data-part="' + part.key + '" style="flex-grow:' + part.count + '"></span>').join('')
+        + '</div><div class="composition-legend" role="group" aria-label="按分类浏览">'
+        + parts.map(part => '<button type="button" data-part="' + part.key + '" title="' + escapeHtml(categoryNames[part.key] + ' · 占 ' + share(part.count)) + '">'
+            + escapeHtml(categoryNames[part.key]) + '<b>' + part.count + '</b></button>').join('') + '</div>';
+    updateCompositionFocus();
+}
+
+function updateCompositionFocus(hovered = '') {
+    const root = $('pulse-composition');
+    const selected = state.githubSearch ? '' : currentCategory();
+    const focus = hovered || (['ai', 'tools', 'devtools', 'other'].includes(selected) ? selected : '');
+    if (focus) root.dataset.focus = focus; else delete root.dataset.focus;
+    root.querySelectorAll('button[data-part]').forEach(button =>
+        button.setAttribute('aria-pressed', String(button.dataset.part === selected)));
 }
 
 async function loadLanguages() {
@@ -506,9 +600,20 @@ function updateStatusUI() {
     $('overview-translations').textContent = Number(status.translation_done || 0).toLocaleString('zh-CN');
     $('pulse-projects').textContent = $('overview-total').textContent;
     $('pulse-translations').textContent = $('overview-translations').textContent;
+    const coverage = status.total_projects > 0
+        ? Math.min(100, Math.max(0, Math.round((status.translation_done || 0) / status.total_projects * 100))) : 0;
+    $('pulse-coverage').textContent = status.total_projects > 0 ? coverage + '%' : '';
+    $('pulse-translation-fill').style.width = coverage + '%';
     const date = parseProjectDate(status.last_fetched);
     $('last-updated').textContent = date ? '更新于 ' + timeAgo(status.last_fetched) : '等待首次更新';
-    $('pulse-freshness').textContent = $('last-updated').textContent;
+    // The same figure-and-unit shape as the other three: "11" + "小时前更新".
+    const age = date ? timeAgo(status.last_fetched) : '';
+    const [, figure, unit] = age.match(/^(\d+)\s*(.+)$/) || [];
+    $('pulse-freshness').textContent = figure || age || '—';
+    $('pulse-freshness-unit').textContent = figure ? unit + '更新' : age ? '更新' : '等待首次更新';
+    $('btn-pulse-status').title = date ? '更新于 ' + date.toLocaleString('zh-CN', { hour12: false }) : '';
+    $('pulse-status-label').textContent = status.is_refreshing ? '项目库更新中' : status.is_data_stale ? '数据较旧 · 建议更新' : '数据快照';
+    $('btn-pulse-status').dataset.tone = status.is_refreshing ? 'working' : status.is_data_stale ? 'warning' : 'ok';
     $('overview-freshness-note').textContent = date ? '上次更新：' + date.toLocaleString('zh-CN', { hour12: false }) : '尚未抓取项目。';
     $('translation-summary-detail').textContent = formatTranslationSummary(status);
     $('btn-retry-failed').disabled = !((status.translation_retry || 0) + (status.translation_failed || 0));
@@ -532,6 +637,7 @@ function updateStatusUI() {
 function healthProblem(problem) {
     const labels = {
         'API_KEY is not configured': '模型密钥尚未配置，翻译与问答暂不可用。',
+        'Remote AI features are not configured': '远程问答与 AI 推荐未配置；本地翻译不受影响。',
         'GITHUB_TOKEN is not configured; GitHub API rate limits will be lower': '未配置 GitHub Token，抓取时更容易受到频率限制。',
         'Proxy is not configured': '未设置代理，请确认可以直接访问 GitHub 与模型服务。',
         'Database check failed': '项目库连接失败。',
@@ -547,6 +653,12 @@ async function checkHealth() {
     try {
         const health = await api('/health');
         state.health = health;
+        const translation = health.checks?.translation;
+        $('translation-engine-name').textContent = translation?.local ? 'Ollama · 本地翻译' : '远程模型翻译';
+        $('translation-engine-detail').textContent = translation
+            ? [translation.model, translation.detail].filter(Boolean).join(' · ') : '当前服务尚未返回翻译方式';
+        $('translation-engine-state').textContent = translation ? (translation.ok ? '已就绪' : '待检查') : '';
+        $('translation-engine-state').dataset.tone = translation?.ok ? 'ok' : 'warning';
         const problems = Array.isArray(health.problems) ? health.problems : [];
         $('overview-health').textContent = problems.length ? '有 ' + problems.length + ' 项需要检查' : '连接正常';
         $('health-summary').classList.toggle('hidden', !problems.length);
@@ -557,6 +669,9 @@ async function checkHealth() {
         state.health = { status: 'warning' };
         $('overview-health').textContent = '无法连接到服务';
         $('overview-health-note').textContent = '请确认应用服务正在运行，再重新检查。';
+        $('translation-engine-name').textContent = '翻译状态暂不可用';
+        $('translation-engine-detail').textContent = '连接恢复后重新检查。';
+        $('translation-engine-state').textContent = '';
         updateStatusUI();
     } finally { $('btn-refresh-health').disabled = false; }
 }
@@ -590,6 +705,7 @@ function applyTheme() {
     const dark = state.theme === 'dark' || (state.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     document.documentElement.dataset.accent = state.accent;
+    document.querySelectorAll('meta[name="theme-color"]').forEach(meta => { meta.content = dark ? '#000000' : '#f5f5f7'; });
     $('theme-select').value = state.theme;
     document.querySelectorAll('[data-accent]').forEach(button => {
         if (button.tagName === 'BUTTON') button.setAttribute('aria-pressed', String(button.dataset.accent === state.accent));
@@ -619,22 +735,39 @@ function scrollToTop() {
 }
 
 function closeNavigation() {
+    const wasOpen = $('site-header').classList.contains('is-open');
     $('site-header').classList.remove('is-open');
+    $('site-header').removeAttribute('aria-modal');
+    $('site-header').removeAttribute('role');
+    document.body.classList.remove('has-navigation');
+    $('navigation-scrim').hidden = true;
+    document.querySelector('.workspace').inert = false;
+    document.querySelector('.workspace-topbar').inert = false;
     $('btn-menu').setAttribute('aria-expanded', 'false');
     $('btn-menu').setAttribute('aria-label', '展开导航');
+    if (wasOpen && $('btn-menu').getClientRects().length) $('btn-menu').focus();
 }
 
-function showToast(message, type = 'info') {
+function showToast(message, type = 'info', action = null) {
     const toast = document.createElement('div');
     toast.className = 'toast toast-' + type;
     toast.innerHTML = icon(type === 'success' ? 'check' : 'info') + '<span>' + escapeHtml(message) + '</span>';
+    const dismiss = () => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 200); };
+    if (action) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'toast-action';
+        button.textContent = action.label;
+        button.addEventListener('click', () => { dismiss(); action.run(); }, { once: true });
+        toast.append(button);
+    }
     const root = document.querySelector('dialog[open]') || $('toast-root');
     if (root.tagName === 'DIALOG') {
         toast.classList.add('dialog-toast');
         root.append(toast);
     } else root.append(toast);
     requestAnimationFrame(() => toast.classList.add('show'));
-    setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 200); }, 2800);
+    setTimeout(dismiss, action ? 6000 : 2800);
 }
 
 async function loadKeywords() {
@@ -711,7 +844,35 @@ function openReader(project) {
     openDialog('reader-modal');
     $('reader-scroll').scrollTop = 0;
     updateReaderProgress();
+    updateReaderNavigation();
     $('reader-content').querySelector('h2').focus({ preventScroll: true });
+}
+
+function canLoadMore() {
+    return !state.recommendMode && !state.githubSearch && state.items.length < state.total;
+}
+
+function updateReaderNavigation() {
+    const index = state.items.indexOf(reader.project);
+    $('reader-prev').disabled = index <= 0;
+    $('reader-next').disabled = index < 0 || (index >= state.items.length - 1 && !canLoadMore());
+}
+
+// Read through the list without leaving the reader; the next page loads when the list runs out.
+async function stepReader(delta) {
+    const index = state.items.indexOf(reader.project);
+    if (index < 0) return;
+    const control = document.activeElement === $('reader-prev') || document.activeElement === $('reader-next')
+        ? (delta > 0 ? $('reader-next') : $('reader-prev')) : null;
+    if (delta > 0 && index === state.items.length - 1 && canLoadMore()) {
+        $('reader-next').disabled = true;
+        await loadProjects(true);
+        if (!$('reader-modal').open) return;
+    }
+    const project = state.items[index + delta];
+    if (!project) { updateReaderNavigation(); return; }
+    openReader(project);
+    if (control && !control.disabled) control.focus();
 }
 
 function applyReaderSize() {
@@ -819,11 +980,27 @@ function bindEvents() {
     });
     [['filter-language', 'language'], ['filter-sort', 'sort'], ['filter-stars', 'minStars']].forEach(([id, key]) => {
         $(id).addEventListener('change', event => {
+            const value = event.target.value;
             cancelSearch();
-            state[key] = key === 'minStars' ? Number(event.target.value) : event.target.value;
+            state[key] = key === 'minStars' ? Number(value) : value;
             loadProjects();
         });
     });
+    document.querySelectorAll('[data-sort]').forEach(button => button.addEventListener('click', () => {
+        cancelSearch();
+        state.sort = button.dataset.sort;
+        loadProjects();
+    }));
+    $('btn-pulse-favorites').addEventListener('click', () => selectCategory('favorites'));
+    const composition = $('pulse-composition');
+    composition.addEventListener('click', event => {
+        const button = event.target.closest('button[data-part]');
+        if (button) selectCategory(button.dataset.part === currentCategory() ? 'all' : button.dataset.part);
+    });
+    for (const [enter, leave] of [['pointerover', 'pointerleave'], ['focusin', 'focusout']]) {
+        composition.addEventListener(enter, event => updateCompositionFocus(event.target.closest('[data-part]')?.dataset.part));
+        composition.addEventListener(leave, () => updateCompositionFocus());
+    }
     $('btn-clear-filters').addEventListener('click', clearFilters);
     $('active-filters').addEventListener('click', event => {
         const button = event.target.closest('[data-filter]');
@@ -896,10 +1073,22 @@ function bindEvents() {
         state.accent = button.dataset.accent; savePreference('accent', state.accent); applyTheme();
     });
     $('btn-menu').addEventListener('click', () => {
-        const expanded = $('site-header').classList.toggle('is-open');
-        $('btn-menu').setAttribute('aria-expanded', String(expanded));
-        $('btn-menu').setAttribute('aria-label', expanded ? '收起导航' : '展开导航');
+        if ($('site-header').classList.contains('is-open')) { closeNavigation(); return; }
+        $('site-header').classList.add('is-open');
+        $('site-header').setAttribute('role', 'dialog');
+        $('site-header').setAttribute('aria-modal', 'true');
+        document.body.classList.add('has-navigation');
+        $('navigation-scrim').hidden = false;
+        document.querySelector('.workspace').inert = true;
+        document.querySelector('.workspace-topbar').inert = true;
+        $('btn-menu').setAttribute('aria-expanded', 'true');
+        $('btn-menu').setAttribute('aria-label', '收起导航');
+        showNavigationMotion($('site-header').querySelector('.header-inner'));
+        $('btn-close-navigation').focus();
     });
+    $('btn-close-navigation').addEventListener('click', closeNavigation);
+    $('navigation-scrim').addEventListener('click', closeNavigation);
+    window.matchMedia('(min-width: 1101px)').addEventListener('change', event => { if (event.matches) closeNavigation(); });
     document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => closeDialog($(button.dataset.close))));
     document.querySelectorAll('dialog').forEach(dialog => {
         dialog.addEventListener('cancel', event => { event.preventDefault(); closeDialog(dialog); });
@@ -927,6 +1116,19 @@ function bindEvents() {
         savePreference('reader-size', reader.size);
         applyReaderSize();
     });
+    $('reader-prev').addEventListener('click', () => stepReader(-1));
+    $('reader-next').addEventListener('click', () => stepReader(1));
+    $('reader-modal').addEventListener('keydown', event => {
+        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        if (event.key === 'ArrowLeft' && !$('reader-prev').disabled) { event.preventDefault(); stepReader(-1); }
+        if (event.key === 'ArrowRight' && !$('reader-next').disabled) { event.preventDefault(); stepReader(1); }
+    });
+    window.addEventListener('popstate', () => {
+        cancelSearch();
+        applyViewFromAddress();
+        updateModeUI();
+        loadProjects();
+    });
     $('reader-chat').addEventListener('click', () => { if (reader.project) openChat(reader.project); });
     $('chat-form').addEventListener('submit', event => { event.preventDefault(); sendChat($('chat-input').value); });
     $('chat-input').addEventListener('keydown', event => {
@@ -945,14 +1147,19 @@ function bindEvents() {
     });
     document.addEventListener('keydown', event => {
         if (document.querySelector('dialog[open]')) return;
+        if ($('site-header').classList.contains('is-open')) {
+            if (event.key === 'Escape') { event.preventDefault(); closeNavigation(); return; }
+            if (event.key === 'Tab') {
+                const controls = [...$('site-header').querySelectorAll('a[href], button:not(:disabled)')].filter(element => element.getClientRects().length);
+                const first = controls[0], last = controls.at(-1);
+                if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+                else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+            }
+            return;
+        }
         if (event.key === 'Escape' && $('filter-panel').open) {
             $('filter-panel').open = false;
             $('filter-panel').querySelector('summary').focus();
-            return;
-        }
-        if (event.key === 'Escape' && $('site-header').classList.contains('is-open')) {
-            closeNavigation();
-            $('btn-menu').focus();
             return;
         }
         const editing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable;

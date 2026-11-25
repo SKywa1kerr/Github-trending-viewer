@@ -75,3 +75,17 @@ await assert.rejects(async () => {
 }, /unavailable/);
 
 console.log('Library state, filtering, UTC dates and fragmented chat streams passed.');
+
+// The address round-trips the current view and ignores unknown values.
+{
+  const { readViewState, buildViewSearch } = await import('../static/js/library.mjs');
+  assert.equal(buildViewSearch({}), '');
+  assert.equal(buildViewSearch({ category: 'all', sort: 'score', minStars: 0 }), '');
+  const view = { category: 'ai', githubSearch: false, query: 'llm 智能体', language: 'C++', minStars: 10000, sort: 'stars_gained' };
+  assert.deepEqual(readViewState(buildViewSearch(view)), view);
+  assert.deepEqual(readViewState(buildViewSearch({ category: 'favorites', githubSearch: true, query: 'topic:llm' })),
+    { category: 'favorites', githubSearch: true, query: 'topic:llm', language: '', minStars: 0, sort: 'score' });
+  assert.deepEqual(readViewState('?view=<script>&sort=drop&stars=7&source=x&q=%20'),
+    { category: 'all', githubSearch: false, query: '', language: '', minStars: 0, sort: 'score' });
+  assert.equal(readViewState('?q=' + 'a'.repeat(500)).query.length, 200);
+}

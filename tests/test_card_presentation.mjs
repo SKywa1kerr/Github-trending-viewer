@@ -244,7 +244,8 @@ test('the restructured shell has unique IDs and every literal script target', ()
   for (const [, id] of script.matchAll(/\$\('([^']+)'\)/g)) assert.ok(known.has(id), 'Missing #' + id);
   for (const id of ['site-header', 'navigation', 'category-navigation', 'filter-panel', 'filter-count']) assert.ok(known.has(id));
   assert.match(html, /<details id="filter-panel"/);
-  assert.match(html, /aria-controls="navigation"/);
+  const menu = html.match(/<button id="btn-menu"[^>]*>/)?.[0] || '';
+  assert.match(menu, /aria-controls="site-header"/);
   assert.doesNotMatch(script, /querySelector\('\.sidebar'\)/);
   assert.doesNotMatch(html, /class="sidebar"|fonts\.googleapis/);
   for (const name of ['bookmark', 'sparkles', 'chevron', 'star']) assert.ok(known.has('icon-' + name));

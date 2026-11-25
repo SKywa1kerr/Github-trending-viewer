@@ -1,4 +1,4 @@
-import { escapeHtml } from './sanitize.mjs';
+import { escapeHtml } from './sanitize.mjs?v=75';
 
 export const categoryNames = {
     all: '发现', ai: '人工智能', tools: '实用工具', devtools: '开发工具',
@@ -113,7 +113,8 @@ export function renderSparkline(history) {
     const title = `最近 ${values.length} 次记录：${deltaText} star`;
     const path = points.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x} ${y}`).join(' ');
     const [x, y] = points.at(-1);
-    return `<svg class="sparkline sparkline-${sparklineTrend(history)}" viewBox="0 0 72 22" width="72" height="22" role="img" aria-label="${escapeHtml(title)}"><title>${escapeHtml(title)}</title><path d="${path}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${x}" cy="${y}" r="1.8" fill="currentColor"/></svg>`;
+    // A faint wash anchors the line to its baseline; the ringed end dot marks the latest reading.
+    return `<svg class="sparkline sparkline-${sparklineTrend(history)}" viewBox="0 0 72 22" width="72" height="22" role="img" aria-label="${escapeHtml(title)}"><title>${escapeHtml(title)}</title><path class="sparkline-area" d="${path} L${x} 22 L${points[0][0]} 22 Z"/><path d="${path}" class="sparkline-line"/><circle cx="${x}" cy="${y}" r="2.6" class="sparkline-end"/></svg>`;
 }
 
 // SQLite timestamps are UTC but omit the timezone. ISO GitHub timestamps already carry one.
@@ -196,4 +197,37 @@ export async function* streamChatText(body) {
             if (done) break;
         }
     } finally { reader.releaseLock(); }
+}
+
+const viewCategories = ['ai', 'tools', 'devtools', 'other', 'favorites', 'recommend'];
+const viewSorts = ['score', 'stars', 'stars_gained', 'updated', 'newest', 'favorited'];
+const viewStarFloors = [0, 1000, 10000, 50000];
+
+// The address carries the view, so a filtered list survives reload, history and bookmarks.
+export function readViewState(search = '') {
+    const params = new URLSearchParams(search);
+    const view = params.get('view');
+    const sort = params.get('sort');
+    const stars = Number(params.get('stars'));
+    return {
+        category: viewCategories.includes(view) ? view : 'all',
+        githubSearch: params.get('source') === 'github',
+        query: (params.get('q') || '').trim().slice(0, 200),
+        language: (params.get('lang') || '').trim().slice(0, 60),
+        minStars: viewStarFloors.includes(stars) ? stars : 0,
+        sort: viewSorts.includes(sort) ? sort : 'score',
+    };
+}
+
+export function buildViewSearch({ category = 'all', githubSearch = false, query = '', language = '',
+    minStars = 0, sort = 'score' } = {}) {
+    const params = new URLSearchParams();
+    if (viewCategories.includes(category)) params.set('view', category);
+    if (githubSearch) params.set('source', 'github');
+    if (query) params.set('q', query);
+    if (language) params.set('lang', language);
+    if (Number(minStars)) params.set('stars', String(Number(minStars)));
+    if (sort && sort !== 'score') params.set('sort', sort);
+    const search = params.toString();
+    return search ? '?' + search : '';
 }
